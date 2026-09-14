@@ -99,6 +99,15 @@ Project helpers: `msvc_build.bat`, `msvc_run.bat`, and `.vscode/` launch + tasks
 
 Keys are case-insensitive (`a` / `A` both work).
 
+### Buying shares (cash starts at Rs. 0)
+
+Portfolio cash begins at **zero**, so buy will fail until you deposit money:
+
+1. Press **M** → enter amount (example: `500000`)
+2. Press **A** → enter symbol (example: `PSO`) → enter shares (example: `10`)
+3. Press **P** to open Portfolio and see holdings / gain-loss
+4. Press **Enter** anytime to refresh prices
+
 ---
 
 ## Screenshot gallery (30)

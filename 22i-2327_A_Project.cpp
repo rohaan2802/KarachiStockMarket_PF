@@ -295,6 +295,7 @@ void drawLiveMarket(HANDLE hConsole,
     resetColor(hConsole);
 
     cout << "Show updates: Enter   | Portfolio: P | Add Stock: A | Remove: R | Add Money: M | Exit: E\n";
+    cout << "Tip: Cash starts at Rs. 0 — press M to add money, then A to buy shares.\n";
     cout << "----------------------------------------------------------------------------------------\n";
 
     cout << left
@@ -411,7 +412,9 @@ void drawPortfolio(HANDLE hConsole,
 
     if (holdCount == 0)
     {
-        cout << "  (No holdings yet — press A to buy shares, M to add money)\n";
+        cout << "  (No holdings yet — cash may be Rs. 0)\n";
+        cout << "  Step 1: press M and enter amount (e.g. 500000)\n";
+        cout << "  Step 2: press A, type a symbol (e.g. PSO), then share quantity\n";
     }
 
     for (int h = 0; h < holdCount; h++)
@@ -554,6 +557,10 @@ void addStock(char symbols[][SYM_LEN],
         cout << "Insufficient balance.\n";
         cout << "  Required : Rs. " << fixed << setprecision(2) << cost << endl;
         cout << "  Available: Rs. " << balance << endl;
+        if (balance <= 0.0001)
+            cout << "  Tip: Press M first to ADD MONEY, then press A again to buy.\n";
+        else
+            cout << "  Tip: Press M to add more cash, or buy fewer shares.\n";
         cout << "Press any key to continue...";
         _getch();
         return;
