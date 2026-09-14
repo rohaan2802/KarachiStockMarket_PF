@@ -4,7 +4,7 @@
     {
       "label": "MSVC: build active file",
       "type": "shell",
-      "command": "& \"${workspaceFolder}\\.vscode\\msvc_build.bat\" \"${file}\"; exit $LASTEXITCODE",
+      "command": "& '${fileDirname}\\msvc_build.bat' '${fileBasename}'; exit $LASTEXITCODE",
       "options": {
         "cwd": "${fileDirname}",
         "shell": {
@@ -31,7 +31,7 @@
     {
       "label": "C/C++: cl.exe build active file",
       "type": "shell",
-      "command": "& \"${workspaceFolder}\\.vscode\\msvc_build.bat\" \"${file}\"; exit $LASTEXITCODE",
+      "command": "& '${fileDirname}\\msvc_build.bat' '${fileBasename}'; exit $LASTEXITCODE",
       "options": {
         "cwd": "${fileDirname}",
         "shell": {
@@ -51,7 +51,7 @@
     {
       "label": "build KSE Simulator",
       "type": "shell",
-      "command": "& \"${workspaceFolder}\\msvc_build.bat\" \"${workspaceFolder}\\22i-2327_A_Project.cpp\"; exit $LASTEXITCODE",
+      "command": "& '${workspaceFolder}\\msvc_build.bat' '22i-2327_A_Project.cpp'; exit $LASTEXITCODE",
       "options": {
         "cwd": "${workspaceFolder}",
         "shell": {
