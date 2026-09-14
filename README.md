@@ -3,7 +3,7 @@
 **Author:** Mohammad Rohaan  
 **Roll No.:** 22I-2327  
 **Section:** A  
-**Course:** Programming Fundamentals — Final Project (BS Cybersecurity)  
+**Course:** Programming Fundamentals — Final Project (BS Cybersecurity)
 **Language:** C++ (MSVC / Windows console)  
 **Main source:** [`22i-2327_A_Project.cpp`](22i-2327_A_Project.cpp)  
 **GitHub:** [rohaan2802/KarachiStockMarket_PF](https://github.com/rohaan2802/KarachiStockMarket_PF)
@@ -306,7 +306,7 @@ Portfolio asks for owner name once, then keeps it for the session and file save.
 
 ### SS24 — Formatted portfolio.txt (`iomanip`)
 
-Saved file uses aligned columns (`setw`, `fixed`, `setprecision`).
+Saved file from a live Exit (**E**) session — aligned columns (`setw`, `fixed`, `setprecision`) with owner, holdings, and balances.
 
 ![SS24 Formatted Portfolio File](docs/screenshots/24_formatted_portfolio_file.png)
 

@@ -329,14 +329,17 @@ draw_lines(d, [
     "****************************************************************************************************",
     "Portfolio owner: Mohammad Rohaan",
     "",
-    "Stocks  Company Name                 shares       Close   Previous   Gain/Loss        High         Low",
+    "Stocks  Company Name                  shares       Close    Previous   Gain/Loss        High         Low",
     "****************************************************************************************************",
-    "PSO     Pakistan State Oil            1000       151.81      150.70       +1110      154.20      150.70",
-    "...",
-    "Today's Gain or Loss (Rs.)  *  +995.00  *",
-    "Previous Balance (Rs.)      *  +....   *",
-    "New Balance (Rs.)           *  +....   *",
-], y=90, size=12)
+    "PSO     Pakistan State Oil                38      150.70      150.70          +0      150.70      150.70",
+    "****************************************************************************************************",
+    "Today's Gain or Loss (Rs.)      *  +0.00  *",
+    "Previous Balance (Rs.)          *  +1994273.40  *",
+    "New Balance (Rs.)               *  +1994273.40  *",
+    "**************************************************",
+    "",
+    "Saved on Exit (E) — real portfolio.txt from a live session",
+], y=88, size=12)
 save(img, "24_formatted_portfolio_file.png")
 
 img, d = new_canvas("25 — Multi-stock table (≥8 KSE names)")
