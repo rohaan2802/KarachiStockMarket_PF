@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build KSE Simulator",
+      "type": "shell",
+      "command": "${workspaceFolder}\\build.bat",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {}
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": ["$msCompile"]
+    },
+    {
+      "label": "run KSE Simulator (external console)",
+      "type": "shell",
+      "command": "start \"KSE Simulator\" cmd /k \"KSE_Simulator.exe\"",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "build KSE Simulator",
+      "problemMatcher": []
+    }
+  ]
+}

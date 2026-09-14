@@ -20,3 +20,8 @@ Desktop.ini
 .DS_Store
 *.user
 *.suo
+
+# Local run redirects
+run_out.txt
+run_err.txt
+
