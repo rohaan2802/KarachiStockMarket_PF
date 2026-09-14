@@ -10,50 +10,51 @@
 
 Console-based **Karachi Stock Exchange–style** trading simulator. The program shows a live market board and a personal portfolio, refreshes prices with a hard **±15%** session cap, lets you buy/sell stocks and move cash, colors gains green / losses red, grows holdings with a **dynamic array**, and saves both market and portfolio files on exit.
 
-This README documents **every major piece** of the project: constraints, rubric mapping, data files, algorithms, functions, how to build/run (including **Cursor**), a full walkthrough, and a **30-image screenshot gallery** with headings.
+This README documents **every major piece** of the project: constraints, rubric mapping, data files, algorithms, functions, how to build/run, a full walkthrough, and a **30-image screenshot gallery** with headings.
 
 ---
 
-## How to run (Cursor / VS Code / any editor)
+## How to run
 
-This app uses Windows console APIs (`system("cls")`, `_getch()`, colored text). It must open in a **real Windows console**, not only the integrated panel — otherwise it can look blank or “stuck”.
+This app uses Windows console APIs (`system("cls")`, `_getch()`, colored text). Run it in a **standard Windows console** so clear-screen, keys, and colors work correctly.
 
-### Click the Run ▶ button (recommended)
+### Fastest way (recommended)
 
-1. Open `22i-2327_A_Project.cpp` (keep this file focused).
-2. In the **Run and Debug** dropdown (top / sidebar), select **`Run C++ file`**.
-3. Click the green **Run ▶** button, or press **F5**.
-
-What happens automatically:
-
-- MSVC environment loads (`vcvars64`)
-- The **open `.cpp` file** is compiled to `22i-2327_A_Project.exe` in the same folder
-- A **new external console** starts with `cwd` = that folder (so `companies.txt` is found)
-
-**Code Runner** users: the ▶ **Run Code** button also works — workspace settings call `.vscode/msvc_run.bat` for the active file.
-
-### Other ways
+From the project folder (`KarachiStockMarket_PF`):
 
 ```bat
-.\run.bat
+run.bat
 ```
+
+This builds if needed and opens the simulator in a new console window. Use **Enter / P / A / R / M / E** there.
+
+### Build, then run manually
 
 ```bat
 build.bat
 22i-2327_A_Project.exe
 ```
 
-Always keep `companies.txt` / `portfolio.txt` next to the `.exe` (project folder).
+Keep `companies.txt` and `portfolio.txt` in the **same folder** as the `.exe`.
 
-### If Run ▶ still fails
+### Optional: Run from an IDE
+
+If your IDE has a Run / Debug action for C++:
+
+1. Open `22i-2327_A_Project.cpp`.
+2. Choose the **`Run C++ file`** launch configuration.
+3. Start Run / Debug so the program opens in an **external** console with working directory = the project folder.
+
+Project helpers: `msvc_build.bat`, `msvc_run.bat`, and `.vscode/` launch + tasks (MSVC `vcvars` + external console).
+
+### Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| `cl.exe` / not recognized | Install **VS Build Tools** (C++ workload). Scripts auto-find `vcvars64.bat`. |
-| Wrong config selected | Dropdown → **`Run C++ file`** (not an old auto-generated config) |
-| Blank / frozen UI | Use external console config (already set); focus the new window |
-| `No companies loaded` | Run the `.cpp` that lives **inside** `KarachiStockMarket_PF\` |
-| Keys ignored | Click the **external** console window |
+| `cl.exe` not recognized | Install Visual Studio **C++ Build Tools**; scripts auto-find `vcvars64.bat` |
+| Blank / frozen after start | Use `run.bat` or an external console (not a limited integrated panel) |
+| `No companies loaded` | Run from inside `KarachiStockMarket_PF\` so `companies.txt` is found |
+| Keys ignored | Focus the console window where the simulator is running |
 
 ---
 
@@ -616,5 +617,5 @@ File-scope mutable state is forbidden by the brief. Capacities are compile-time 
 - [x] Colors for gain / loss
 - [x] Dynamic holdings array
 - [x] Save `companies.txt` + formatted `portfolio.txt` on exit
-- [x] `build.bat` + Cursor `run.bat` / `.vscode` launch
+- [x] `build.bat` + `run.bat` / launch helpers
 - [x] README with full detail + all 30 screenshots headed
