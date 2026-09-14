@@ -274,23 +274,18 @@ Declared inside `main` and passed into helpers:
 
 ```text
 KarachiStockMarket_PF/
-├── 22i-2327_A_Project.cpp   # submission source (author header + full app)
-├── Source.cpp               # identical copy for IDE templates
+├── 22i-2327_A_Project.cpp   # only source file (submission)
 ├── companies.txt            # market CSV (read + overwritten on exit)
 ├── portfolio.txt            # last saved portfolio (iomanip)
-├── build.bat                # MSVC one-click build
-├── run.bat                  # open simulator in EXTERNAL Windows console
-├── KSE_Simulator.exe        # local build output (gitignored)
+├── build.bat / run.bat      # build + launch helpers
+├── msvc_build.bat / msvc_run.bat
 ├── README.md
-├── .vscode/
-│   ├── launch.json          # F5 → external console
-│   ├── tasks.json           # Ctrl+Shift+B build
-│   └── c_cpp_properties.json
+├── .vscode/                 # launch / tasks / IntelliSense
 └── docs/
     ├── Project.pdf
     ├── Project-self-evaluation-sheet.pdf
     ├── portfolio-sample.txt
-    ├── starter.cpp
+    ├── starter.cpp          # original brief starter sketch
     ├── generate_screenshots.py
     └── screenshots/         # 01–30 PNG gallery (embedded below)
 ```
@@ -308,7 +303,7 @@ build.bat
 Equivalent after `vcvars64.bat`:
 
 ```bat
-cl /EHsc /W3 /Fe:KSE_Simulator.exe 22i-2327_A_Project.cpp /link user32.lib
+cl /EHsc /W3 /Fe:22i-2327_A_Project.exe 22i-2327_A_Project.cpp /link user32.lib
 ```
 
 **Verified on this machine:** MSVC `cl` succeeds (`EXITCODE=0`).
@@ -316,7 +311,7 @@ cl /EHsc /W3 /Fe:KSE_Simulator.exe 22i-2327_A_Project.cpp /link user32.lib
 ### MinGW (optional)
 
 ```bat
-g++ -std=c++17 -O2 -o KSE_Simulator.exe 22i-2327_A_Project.cpp
+g++ -std=c++17 -O2 -o 22i-2327_A_Project.exe 22i-2327_A_Project.cpp
 ```
 
 Requires MinGW with Windows headers (`windows.h`, `conio.h`).
