@@ -306,7 +306,7 @@ Portfolio asks for owner name once, then keeps it for the session and file save.
 
 ### SS24 — Formatted portfolio.txt (`iomanip`)
 
-Saved file from a live Exit (**E**) session — aligned columns (`setw`, `fixed`, `setprecision`) with owner, holdings, and balances.
+Saved file from Exit (**E**) — fixed-width columns so every heading lines up with its values (`setw` / `setprecision`).
 
 ![SS24 Formatted Portfolio File](docs/screenshots/24_formatted_portfolio_file.png)
 
@@ -434,7 +434,13 @@ Twelve KSE-like listings ship with the repo. On exit, **current** prices overwri
 
 ### `portfolio.txt` (written on exit)
 
-Formatted with `<iomanip>`: owner name, holdings columns (symbol, company, shares, curr, prev, G/L, high, low), today’s G/L, previous cash balance, and new balance. Sample layout: [`docs/portfolio-sample.txt`](docs/portfolio-sample.txt).
+Fixed-width table written with `<iomanip>` (`setw`, `left`/`right`, `fixed`, `setprecision(2)`):
+
+- Header and every data row use the **same column widths** (symbol, company, shares, close, previous, gain/loss, high, low)
+- Footer lines use a fixed label column + aligned money values (no tabs)
+- Separator lines match the full table width
+
+Sample: [`docs/portfolio-sample.txt`](docs/portfolio-sample.txt).
 
 ---
 

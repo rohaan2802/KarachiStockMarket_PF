@@ -326,20 +326,21 @@ save(img, "23_name_entry.png")
 
 img, d = new_canvas("24 — Formatted portfolio.txt (iomanip)")
 draw_lines(d, [
-    "****************************************************************************************************",
+    "************************************************************************************************",
     "Portfolio owner: Mohammad Rohaan",
     "",
-    "Stocks  Company Name                  shares       Close    Previous   Gain/Loss        High         Low",
-    "****************************************************************************************************",
-    "PSO     Pakistan State Oil                38      150.70      150.70          +0      150.70      150.70",
-    "****************************************************************************************************",
-    "Today's Gain or Loss (Rs.)      *  +0.00  *",
-    "Previous Balance (Rs.)          *  +1994273.40  *",
-    "New Balance (Rs.)               *  +1994273.40  *",
-    "**************************************************",
+    "Stocks  Company Name                      Shares       Close    Previous     Gain/Loss        High         Low",
+    "************************************************************************************************",
+    "PSO     Pakistan State Oil                    38       150.70       150.70         0.00       150.70       150.70",
+    "HBL     Habib Bank Limited                   100        70.00        69.50       +50.00        70.25        69.40",
+    "************************************************************************************************",
+    "Today's Gain or Loss (Rs.)    *          +50.00 *",
+    "Previous Balance (Rs.)        *     +1994273.40 *",
+    "New Balance (Rs.)             *     +1994323.40 *",
+    "************************************************************************************************",
     "",
-    "Saved on Exit (E) — real portfolio.txt from a live session",
-], y=88, size=12)
+    "Fixed-width columns via setw / setprecision — header aligned with every value row",
+], y=82, size=11)
 save(img, "24_formatted_portfolio_file.png")
 
 img, d = new_canvas("25 — Multi-stock table (≥8 KSE names)")

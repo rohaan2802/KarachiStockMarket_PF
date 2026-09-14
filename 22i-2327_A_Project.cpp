@@ -17,6 +17,7 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <string>
 #include <cstring>
 #include <ctime>
 #include <cstdlib>
@@ -30,6 +31,14 @@ using namespace std;
 #define SYM_LEN 16
 #define NAME_LEN 64
 #define OWNER_LEN 64
+
+/* Fixed column widths for portfolio.txt (header + every data row) */
+#define COL_SYM 8
+#define COL_NAME 32
+#define COL_SHARES 10
+#define COL_PRICE 12
+#define COL_GL 14
+#define PORTFOLIO_LINE_WIDTH (COL_SYM + COL_NAME + COL_SHARES + COL_PRICE * 4 + COL_GL)
 
 /* ---------- Console helpers (state passed in via HANDLE) ---------- */
 
@@ -137,10 +146,11 @@ bool saveCompanies(const char *filename,
     if (!fout.is_open())
         return false;
 
+    /* CSV required by brief — keep fields tidy: no extra spaces, price always 2 dp */
+    fout << fixed << setprecision(2);
     for (int i = 0; i < companyCount; i++)
     {
-        fout << symbols[i] << "," << names[i] << ","
-             << fixed << setprecision(2) << currPrice[i] << "\n";
+        fout << symbols[i] << "," << names[i] << "," << currPrice[i] << "\n";
     }
     fout.close();
     return true;
@@ -396,16 +406,14 @@ void drawPortfolio(HANDLE hConsole,
     cout << "Updates: Enter | Live Market: L | Add: A | Remove: R | Money: M | Withdraw: W\n";
     cout << "----------------------------------------------------------------------------------------\n";
 
-    cout << left
-         << setw(8) << "Stocks"
-         << setw(28) << "Company Name"
-         << right
-         << setw(8) << "Shares"
-         << setw(10) << "Current"
-         << setw(10) << "Previous"
-         << setw(12) << "Gain/Loss"
-         << setw(10) << "High"
-         << setw(10) << "Low" << endl;
+    cout << left << setw(COL_SYM) << "Stocks"
+         << left << setw(COL_NAME) << "Company Name"
+         << right << setw(COL_SHARES) << "Shares"
+         << right << setw(COL_PRICE) << "Current"
+         << right << setw(COL_PRICE) << "Previous"
+         << right << setw(COL_GL) << "Gain/Loss"
+         << right << setw(COL_PRICE) << "High"
+         << right << setw(COL_PRICE) << "Low" << endl;
     cout << "----------------------------------------------------------------------------------------\n";
 
     double todayGL = 0.0;
@@ -426,17 +434,17 @@ void drawPortfolio(HANDLE hConsole,
         double gl = (currPrice[idx] - prevPrice[idx]) * holdShares[h];
         todayGL += gl;
 
-        cout << left << setw(8) << symbols[idx]
-             << setw(28) << names[idx]
-             << right << setw(8) << holdShares[h]
+        cout << left << setw(COL_SYM) << symbols[idx]
+             << left << setw(COL_NAME) << names[idx]
+             << right << setw(COL_SHARES) << holdShares[h]
              << fixed << setprecision(2)
-             << setw(10) << currPrice[idx]
-             << setw(10) << prevPrice[idx]
+             << right << setw(COL_PRICE) << currPrice[idx]
+             << right << setw(COL_PRICE) << prevPrice[idx]
              << setw(1) << " ";
         printGainLossColored(hConsole, gl);
         cout << right << fixed << setprecision(2)
-             << setw(10) << highPrice[idx]
-             << setw(10) << lowPrice[idx] << endl;
+             << setw(COL_PRICE) << highPrice[idx]
+             << setw(COL_PRICE) << lowPrice[idx] << endl;
     }
 
     double previousBalance = balance;
@@ -677,6 +685,69 @@ void removeStock(char symbols[][SYM_LEN],
     _getch();
 }
 
+/* Write one money cell into a fixed-width field (optional leading +) */
+void writeAlignedMoney(ostream &out, double value, int width, bool showPlus)
+{
+    ostringstream cell;
+    cell << fixed << setprecision(2);
+    if (showPlus && value > 0.0001)
+        cell << "+";
+    cell << value;
+    out << right << setw(width) << cell.str();
+}
+
+void writePortfolioSeparator(ostream &out)
+{
+    out << setfill('*') << setw(PORTFOLIO_LINE_WIDTH) << "" << setfill(' ') << "\n";
+}
+
+void writePortfolioHeaderRow(ostream &out)
+{
+    out << left << setw(COL_SYM) << "Stocks"
+        << left << setw(COL_NAME) << "Company Name"
+        << right << setw(COL_SHARES) << "Shares"
+        << right << setw(COL_PRICE) << "Close"
+        << right << setw(COL_PRICE) << "Previous"
+        << right << setw(COL_GL) << "Gain/Loss"
+        << right << setw(COL_PRICE) << "High"
+        << right << setw(COL_PRICE) << "Low"
+        << "\n";
+}
+
+void writePortfolioDataRow(ostream &out,
+                           const char *symbol,
+                           const char *companyName,
+                           int shares,
+                           double closePrice,
+                           double previousPrice,
+                           double gainLoss,
+                           double high,
+                           double low)
+{
+    out << left << setw(COL_SYM) << symbol
+        << left << setw(COL_NAME) << companyName
+        << right << setw(COL_SHARES) << shares
+        << fixed << setprecision(2)
+        << right << setw(COL_PRICE) << closePrice
+        << right << setw(COL_PRICE) << previousPrice;
+    writeAlignedMoney(out, gainLoss, COL_GL, true);
+    out << fixed << setprecision(2)
+        << right << setw(COL_PRICE) << high
+        << right << setw(COL_PRICE) << low
+        << "\n";
+}
+
+void writePortfolioFooterLine(ostream &out, const char *label, double value)
+{
+    const int labelWidth = 30;
+    const int valueWidth = 16;
+    out << left << setw(labelWidth) << label
+        << " * "
+        << right;
+    writeAlignedMoney(out, value, valueWidth, true);
+    out << " *" << "\n";
+}
+
 bool savePortfolio(const char *filename,
                    const char *ownerName,
                    double balance,
@@ -701,19 +772,16 @@ bool savePortfolio(const char *filename,
     double previousBalance = balance;
     double newBalance = balance + todayGL;
 
-    fout << setfill('*') << setw(100) << "" << setfill(' ') << "\n";
+    writePortfolioSeparator(fout);
     fout << "Portfolio owner: " << ownerName << "\n\n";
-    fout << left
-         << setw(8) << "Stocks"
-         << setw(28) << "Company Name"
-         << right
-         << setw(8) << "shares"
-         << setw(12) << "Close"
-         << setw(12) << "Previous"
-         << setw(12) << "Gain/Loss"
-         << setw(12) << "High"
-         << setw(12) << "Low" << "\n";
-    fout << setfill('*') << setw(100) << "" << setfill(' ') << "\n";
+    writePortfolioHeaderRow(fout);
+    writePortfolioSeparator(fout);
+
+    if (holdCount == 0)
+    {
+        fout << left << setw(PORTFOLIO_LINE_WIDTH)
+             << "(No holdings in this session)" << "\n";
+    }
 
     for (int h = 0; h < holdCount; h++)
     {
@@ -721,36 +789,22 @@ bool savePortfolio(const char *filename,
         if (idx < 0)
             continue;
         double gl = (currPrice[idx] - prevPrice[idx]) * holdShares[h];
-
-        fout << left << setw(8) << symbols[idx]
-             << setw(28) << names[idx]
-             << right << setw(8) << holdShares[h]
-             << fixed << setprecision(2)
-             << setw(12) << currPrice[idx]
-             << setw(12) << prevPrice[idx];
-
-        fout << setw(12);
-        if (gl >= 0)
-            fout << ("+" + to_string((long long)llround(gl)));
-        else
-            fout << ((long long)llround(gl));
-
-        fout << fixed << setprecision(2)
-             << setw(12) << highPrice[idx]
-             << setw(12) << lowPrice[idx] << "\n";
+        writePortfolioDataRow(fout,
+                              symbols[idx],
+                              names[idx],
+                              holdShares[h],
+                              currPrice[idx],
+                              prevPrice[idx],
+                              gl,
+                              highPrice[idx],
+                              lowPrice[idx]);
     }
 
-    fout << setfill('*') << setw(100) << "" << setfill(' ') << "\n";
-    fout << left << setw(32) << "Today's Gain or Loss (Rs.)"
-         << "*\t" << showpos << fixed << setprecision(2) << todayGL
-         << noshowpos << "\t*" << "\n";
-    fout << left << setw(32) << "Previous Balance (Rs.)"
-         << "*\t" << showpos << fixed << setprecision(2) << previousBalance
-         << noshowpos << "\t*" << "\n";
-    fout << left << setw(32) << "New Balance (Rs.)"
-         << "*\t" << showpos << fixed << setprecision(2) << newBalance
-         << noshowpos << "\t*" << "\n";
-    fout << setfill('*') << setw(50) << "" << setfill(' ') << "\n";
+    writePortfolioSeparator(fout);
+    writePortfolioFooterLine(fout, "Today's Gain or Loss (Rs.)", todayGL);
+    writePortfolioFooterLine(fout, "Previous Balance (Rs.)", previousBalance);
+    writePortfolioFooterLine(fout, "New Balance (Rs.)", newBalance);
+    writePortfolioSeparator(fout);
 
     fout.close();
     return true;
