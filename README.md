@@ -10,7 +10,7 @@
 
 Console-based **Karachi Stock Exchange–style** trading simulator. The program shows a live market board and a personal portfolio, refreshes prices with a hard **±15%** session cap, lets you buy/sell stocks and move cash, colors gains green / losses red, grows holdings with a **dynamic array**, and saves both market and portfolio files on exit.
 
-This README documents **every major piece** of the project: constraints, rubric mapping, data files, algorithms, functions, how to build/run, a full walkthrough, and a **30-image screenshot gallery** with headings.
+This README starts with run steps, features, and keymap, then a **30-image screenshot gallery**, followed by full technical detail (constraints, rubric, algorithms, functions, and more).
 
 ---
 
@@ -58,17 +58,6 @@ Project helpers: `msvc_build.bat`, `msvc_run.bat`, and `.vscode/` launch + tasks
 
 ---
 
-## Hard constraints (ZERO marks if violated)
-
-| Rule | How this project complies |
-|------|---------------------------|
-| **No global variables** | All market arrays, cash, holdings pointers, counters live in `main` and are passed by parameter. Capacities use `#define` only. |
-| **No `goto`** | Control flow uses loops + `if` / `else` only. |
-| **No OOP / classes** | No classes or member functions — **parallel arrays + free functions** only. |
-| **Name / Roll / Section** | Present at the top of `22i-2327_A_Project.cpp`. |
-
----
-
 ## What the program does (feature overview)
 
 1. **Loads** stock symbols, company names, and prices from `companies.txt`.
@@ -80,44 +69,6 @@ Project helpers: `msvc_build.bat`, `msvc_run.bat`, and `.vscode/` launch + tasks
 7. **Add money** (**M**) / **Withdraw** (**W**, portfolio only) with validations.
 8. On **Exit** (**E**), writes updated prices to `companies.txt` and a formatted `portfolio.txt` (`iomanip`).
 9. **Colors:** positive gain/loss green, negative red (Win32 `SetConsoleTextAttribute`).
-
----
-
-## Assignment requirements (from `docs/Project.pdf`)
-
-| # | Requirement | Implementation |
-|---|-------------|----------------|
-| 1 | Load / save market data | `loadCompanies` / `saveCompanies` on `companies.txt` (CSV) |
-| 2 | Live Market screen | `drawLiveMarket` — full board + footer stats |
-| 3 | Enter refreshes prices | `refreshAllPrices` — random Δ, ±15% clamp, high/low, traded, top A/D |
-| 4 | Portfolio screen | `drawPortfolio` — name, table, footer balances |
-| 5 | Add / remove stock | `addStock` / `removeStock` |
-| 6 | Add / withdraw money | `addMoney` / `withdrawMoney` |
-| 7 | Save on exit | Both files rewritten when user presses **E** |
-
-Official brief: [`docs/Project.pdf`](docs/Project.pdf)
-
----
-
-## Rubric + bonuses (self-evaluation mapping)
-
-| Task | Marks | Status | Where in code |
-|------|------:|--------|---------------|
-| Load stock market data | 10 | Done | `loadCompanies` |
-| Show Stock Market Screen | 10 | Done | `drawLiveMarket` |
-| Random ±, high/low, traded, top A/D | 20 | Done | `refreshAllPrices`, `findTopAdvancerDecliner` |
-| Load / store portfolio.txt | 10 | Done | `savePortfolio` (written each exit) |
-| Show portfolio screen | 10 | Done | `drawPortfolio` |
-| Portfolio G/L, high/low, balances | 20 | Done | `computePortfolioTotals` + draw |
-| Add stock (+ colors bonus) | 10 (+10) | Done | `addStock` + `printGainLossColored` |
-| Remove stock | 10 | Done | `removeStock` |
-| Add / withdraw money | 10 | Done | `addMoney` / `withdrawMoney` |
-| Save market on close (bonus) | 10 | Done | `saveCompanies` on exit |
-| Dynamic array for holdings (bonus) | 10 | Done | `expandHoldings` / `freeHoldings` (`new[]` / `delete[]`) |
-| `portfolio.txt` via `iomanip` (bonus) | 10 | Done | `setw` / `setprecision` / `fixed` in `savePortfolio` |
-
-Self-evaluation PDF: [`docs/Project-self-evaluation-sheet.pdf`](docs/Project-self-evaluation-sheet.pdf)  
-Checklist visual: see **SS29** below.
 
 ---
 
@@ -147,189 +98,6 @@ Checklist visual: see **SS29** below.
 | **E** | Exit and save both files |
 
 Keys are case-insensitive (`a` / `A` both work).
-
----
-
-## Data files
-
-### `companies.txt` (input + output)
-
-CSV lines: `SYMBOL,Company Name,price`
-
-```text
-PSO,Pakistan State Oil,150.70
-LUCK,Lucky Cement,488.20
-HBL,Habib Bank Limited,70.00
-OGDC,Oil and Gas Development Company,76.40
-PPL,Pakistan Petroleum Limited,112.35
-POL,Pakistan Oilfields Limited,415.50
-MARI,Mari Petroleum Company Limited,1520.00
-ENGRO,Engro Corporation Limited,305.25
-TRG,TRG Pakistan Limited,78.90
-MEBL,Meezan Bank Limited,113.00
-SYS,Systems Limited,425.60
-UBL,United Bank Limited,168.40
-```
-
-Twelve KSE-like listings ship with the repo. On exit, **current** prices overwrite this file and become the next run’s session-start prices.
-
-### `portfolio.txt` (written on exit)
-
-Formatted with `<iomanip>`: owner name, holdings columns (symbol, company, shares, curr, prev, G/L, high, low), today’s G/L, previous cash balance, and new balance. Sample layout: [`docs/portfolio-sample.txt`](docs/portfolio-sample.txt).
-
----
-
-## Algorithms (detail)
-
-### Price refresh (±15% hard cap)
-
-1. When `companies.txt` loads, copy each price into `sessionStart[i]` (fixed for this process).
-2. On **Enter**:
-   - `prevPrice[i] = currPrice[i]`
-   - Build a candidate: `curr + intDelta + fracDelta`  
-     (`intDelta` ∈ [-3, +3], `fracDelta` ∈ [-0.99, +0.99])
-   - Clamp candidate into `[sessionStart * 0.85, sessionStart * 1.15]`
-   - Update session `highPrice` / `lowPrice`
-   - `pctChange[i] = ((curr - prev) / prev) * 100`
-3. Top advancer / decliner = indices of max / min `pctChange`.
-4. On exit, `currPrice` values are written to `companies.txt`.
-
-### Portfolio gain / loss
-
-```text
-rowGainLoss = (currPrice - prevPrice) * shares
-todayGL     = sum(rowGainLoss over all holdings)
-newBalance  = cashBalance + todayGL   (display footer)
-```
-
-- **Buy:** cash decreases by `curr * shares`; holding created or increased; `totalSharesTraded` increases.
-- **Sell:** cash increases by `curr * shares`; holding decreased or removed; `totalSharesTraded` increases.
-
-### Colors (Win32)
-
-| Condition | Color |
-|-----------|--------|
-| Gain &gt; 0 | Bright green |
-| Loss &lt; 0 | Bright red |
-| Flat ≈ 0 | Default white |
-
-Screen clear uses `system("cls")`. Single-key input uses `_getch()` from `<conio.h>`.
-
-### Dynamic holdings (bonus)
-
-`expandHoldings` doubles capacity with `new[]` / `delete[]`. `freeHoldings` releases memory before exit. No STL containers for the holdings list — raw parallel arrays only.
-
----
-
-## Parallel arrays & state (no globals)
-
-Declared inside `main` and passed into helpers:
-
-| Array / variable | Role |
-|------------------|------|
-| `symbols[][SYM_LEN]` | Market tickers |
-| `names[][NAME_LEN]` | Company display names |
-| `sessionStart[]` | Cap anchors (±15%) |
-| `prevPrice[]` / `currPrice[]` | Previous / current tick |
-| `highPrice[]` / `lowPrice[]` | Session extremes |
-| `pctChange[]` | Last refresh % move |
-| `balance` | Cash |
-| `holdSymbols` / `holdShares` | Dynamic holdings |
-| `holdCount` / `holdCapacity` | Holdings size / capacity |
-| `totalSharesTraded` | Cumulative buy+sell volume |
-| `ownerName` | Portfolio owner |
-| `hConsole` | Win32 console handle for colors |
-
-`#define` constants only: `MAX_COMPANIES`, `SYM_LEN`, `NAME_LEN`, `OWNER_LEN`.
-
----
-
-## Function inventory
-
-| Function | Purpose |
-|----------|---------|
-| `clearScreen` | `cls` |
-| `setColor` / `resetColor` | Console text attributes |
-| `printGainLossColored` | Print signed G/L in green/red |
-| `enableUtf8Console` | UTF-8 code page for ↑/↓ |
-| `loadCompanies` | Parse `companies.txt` into parallel arrays |
-| `saveCompanies` | Write current prices back |
-| `findSymbolIndex` | Lookup ticker in market |
-| `refreshAllPrices` | Random move + ±15% clamp + high/low/% |
-| `findTopAdvancerDecliner` | Best / worst % on last refresh |
-| `expandHoldings` / `freeHoldings` | Dynamic array grow / free |
-| `findHoldingIndex` | Lookup ticker in holdings |
-| `drawLiveMarket` | Full market UI + footer |
-| `computePortfolioTotals` | Today’s G/L aggregate |
-| `drawPortfolio` | Full portfolio UI + footer |
-| `addMoney` / `withdrawMoney` | Cash in / out with checks |
-| `addStock` / `removeStock` | Buy / sell with validations |
-| `savePortfolio` | Formatted `portfolio.txt` |
-| `ensureOwnerName` | Prompt once for investor name |
-| `main` | Owns all state; event loop |
-
----
-
-## Project layout
-
-```text
-KarachiStockMarket_PF/
-├── 22i-2327_A_Project.cpp   # only source file (submission)
-├── companies.txt            # market CSV (read + overwritten on exit)
-├── portfolio.txt            # last saved portfolio (iomanip)
-├── build.bat / run.bat      # build + launch helpers
-├── msvc_build.bat / msvc_run.bat
-├── README.md
-├── .vscode/                 # launch / tasks / IntelliSense
-└── docs/
-    ├── Project.pdf
-    ├── Project-self-evaluation-sheet.pdf
-    ├── portfolio-sample.txt
-    ├── starter.cpp          # original brief starter sketch
-    ├── generate_screenshots.py
-    └── screenshots/         # 01–30 PNG gallery (embedded below)
-```
-
----
-
-## Build notes
-
-### MSVC (Build Tools / Visual Studio) — primary
-
-```bat
-build.bat
-```
-
-Equivalent after `vcvars64.bat`:
-
-```bat
-cl /EHsc /W3 /Fe:22i-2327_A_Project.exe 22i-2327_A_Project.cpp /link user32.lib
-```
-
-**Verified on this machine:** MSVC `cl` succeeds (`EXITCODE=0`).
-
-### MinGW (optional)
-
-```bat
-g++ -std=c++17 -O2 -o 22i-2327_A_Project.exe 22i-2327_A_Project.cpp
-```
-
-Requires MinGW with Windows headers (`windows.h`, `conio.h`).
-
----
-
-## Suggested manual walkthrough (test plan)
-
-1. Start via `.\run.bat` — confirm 12 companies load and Live Market appears.
-2. Press **Enter** several times — Prev/Curr change; ↑/↓ update; high/low move; top advancer/decliner update.
-3. Press **M**, deposit cash (e.g. `500000`).
-4. Press **A**, buy `PSO` shares — cash drops; traded counter rises.
-5. Press **P** — enter name — holdings table shows G/L colors after another Enter refresh.
-6. Press **A** again to buy a second symbol — dynamic holdings expand.
-7. Press **R** to sell partial/full shares — validations for bad symbol / too many shares.
-8. Press **W** to withdraw — reject amounts above cash.
-9. Try invalid symbol on buy — error message, no crash.
-10. Press **E** — confirm `companies.txt` prices changed and `portfolio.txt` is formatted.
 
 ---
 
@@ -580,6 +348,238 @@ Visual map of rubric items completed for the self-evaluation sheet.
 End-to-end feature summary: market, portfolio, files, bonuses, constraints.
 
 ![SS30 Complete Feature Map](docs/screenshots/30_complete_feature_map.png)
+
+---
+
+## Hard constraints (ZERO marks if violated)
+
+| Rule | How this project complies |
+|------|---------------------------|
+| **No global variables** | All market arrays, cash, holdings pointers, counters live in `main` and are passed by parameter. Capacities use `#define` only. |
+| **No `goto`** | Control flow uses loops + `if` / `else` only. |
+| **No OOP / classes** | No classes or member functions — **parallel arrays + free functions** only. |
+| **Name / Roll / Section** | Present at the top of `22i-2327_A_Project.cpp`. |
+
+---
+
+## Assignment requirements (from `docs/Project.pdf`)
+
+| # | Requirement | Implementation |
+|---|-------------|----------------|
+| 1 | Load / save market data | `loadCompanies` / `saveCompanies` on `companies.txt` (CSV) |
+| 2 | Live Market screen | `drawLiveMarket` — full board + footer stats |
+| 3 | Enter refreshes prices | `refreshAllPrices` — random Δ, ±15% clamp, high/low, traded, top A/D |
+| 4 | Portfolio screen | `drawPortfolio` — name, table, footer balances |
+| 5 | Add / remove stock | `addStock` / `removeStock` |
+| 6 | Add / withdraw money | `addMoney` / `withdrawMoney` |
+| 7 | Save on exit | Both files rewritten when user presses **E** |
+
+Official brief: [`docs/Project.pdf`](docs/Project.pdf)
+
+---
+
+## Rubric + bonuses (self-evaluation mapping)
+
+| Task | Marks | Status | Where in code |
+|------|------:|--------|---------------|
+| Load stock market data | 10 | Done | `loadCompanies` |
+| Show Stock Market Screen | 10 | Done | `drawLiveMarket` |
+| Random ±, high/low, traded, top A/D | 20 | Done | `refreshAllPrices`, `findTopAdvancerDecliner` |
+| Load / store portfolio.txt | 10 | Done | `savePortfolio` (written each exit) |
+| Show portfolio screen | 10 | Done | `drawPortfolio` |
+| Portfolio G/L, high/low, balances | 20 | Done | `computePortfolioTotals` + draw |
+| Add stock (+ colors bonus) | 10 (+10) | Done | `addStock` + `printGainLossColored` |
+| Remove stock | 10 | Done | `removeStock` |
+| Add / withdraw money | 10 | Done | `addMoney` / `withdrawMoney` |
+| Save market on close (bonus) | 10 | Done | `saveCompanies` on exit |
+| Dynamic array for holdings (bonus) | 10 | Done | `expandHoldings` / `freeHoldings` (`new[]` / `delete[]`) |
+| `portfolio.txt` via `iomanip` (bonus) | 10 | Done | `setw` / `setprecision` / `fixed` in `savePortfolio` |
+
+Self-evaluation PDF: [`docs/Project-self-evaluation-sheet.pdf`](docs/Project-self-evaluation-sheet.pdf)  
+Checklist visual: see **SS29** below.
+
+---
+
+## Data files
+
+### `companies.txt` (input + output)
+
+CSV lines: `SYMBOL,Company Name,price`
+
+```text
+PSO,Pakistan State Oil,150.70
+LUCK,Lucky Cement,488.20
+HBL,Habib Bank Limited,70.00
+OGDC,Oil and Gas Development Company,76.40
+PPL,Pakistan Petroleum Limited,112.35
+POL,Pakistan Oilfields Limited,415.50
+MARI,Mari Petroleum Company Limited,1520.00
+ENGRO,Engro Corporation Limited,305.25
+TRG,TRG Pakistan Limited,78.90
+MEBL,Meezan Bank Limited,113.00
+SYS,Systems Limited,425.60
+UBL,United Bank Limited,168.40
+```
+
+Twelve KSE-like listings ship with the repo. On exit, **current** prices overwrite this file and become the next run’s session-start prices.
+
+### `portfolio.txt` (written on exit)
+
+Formatted with `<iomanip>`: owner name, holdings columns (symbol, company, shares, curr, prev, G/L, high, low), today’s G/L, previous cash balance, and new balance. Sample layout: [`docs/portfolio-sample.txt`](docs/portfolio-sample.txt).
+
+---
+
+## Algorithms (detail)
+
+### Price refresh (±15% hard cap)
+
+1. When `companies.txt` loads, copy each price into `sessionStart[i]` (fixed for this process).
+2. On **Enter**:
+   - `prevPrice[i] = currPrice[i]`
+   - Build a candidate: `curr + intDelta + fracDelta`  
+     (`intDelta` ∈ [-3, +3], `fracDelta` ∈ [-0.99, +0.99])
+   - Clamp candidate into `[sessionStart * 0.85, sessionStart * 1.15]`
+   - Update session `highPrice` / `lowPrice`
+   - `pctChange[i] = ((curr - prev) / prev) * 100`
+3. Top advancer / decliner = indices of max / min `pctChange`.
+4. On exit, `currPrice` values are written to `companies.txt`.
+
+### Portfolio gain / loss
+
+```text
+rowGainLoss = (currPrice - prevPrice) * shares
+todayGL     = sum(rowGainLoss over all holdings)
+newBalance  = cashBalance + todayGL   (display footer)
+```
+
+- **Buy:** cash decreases by `curr * shares`; holding created or increased; `totalSharesTraded` increases.
+- **Sell:** cash increases by `curr * shares`; holding decreased or removed; `totalSharesTraded` increases.
+
+### Colors (Win32)
+
+| Condition | Color |
+|-----------|--------|
+| Gain &gt; 0 | Bright green |
+| Loss &lt; 0 | Bright red |
+| Flat ≈ 0 | Default white |
+
+Screen clear uses `system("cls")`. Single-key input uses `_getch()` from `<conio.h>`.
+
+### Dynamic holdings (bonus)
+
+`expandHoldings` doubles capacity with `new[]` / `delete[]`. `freeHoldings` releases memory before exit. No STL containers for the holdings list — raw parallel arrays only.
+
+---
+
+## Parallel arrays & state (no globals)
+
+Declared inside `main` and passed into helpers:
+
+| Array / variable | Role |
+|------------------|------|
+| `symbols[][SYM_LEN]` | Market tickers |
+| `names[][NAME_LEN]` | Company display names |
+| `sessionStart[]` | Cap anchors (±15%) |
+| `prevPrice[]` / `currPrice[]` | Previous / current tick |
+| `highPrice[]` / `lowPrice[]` | Session extremes |
+| `pctChange[]` | Last refresh % move |
+| `balance` | Cash |
+| `holdSymbols` / `holdShares` | Dynamic holdings |
+| `holdCount` / `holdCapacity` | Holdings size / capacity |
+| `totalSharesTraded` | Cumulative buy+sell volume |
+| `ownerName` | Portfolio owner |
+| `hConsole` | Win32 console handle for colors |
+
+`#define` constants only: `MAX_COMPANIES`, `SYM_LEN`, `NAME_LEN`, `OWNER_LEN`.
+
+---
+
+## Function inventory
+
+| Function | Purpose |
+|----------|---------|
+| `clearScreen` | `cls` |
+| `setColor` / `resetColor` | Console text attributes |
+| `printGainLossColored` | Print signed G/L in green/red |
+| `enableUtf8Console` | UTF-8 code page for ↑/↓ |
+| `loadCompanies` | Parse `companies.txt` into parallel arrays |
+| `saveCompanies` | Write current prices back |
+| `findSymbolIndex` | Lookup ticker in market |
+| `refreshAllPrices` | Random move + ±15% clamp + high/low/% |
+| `findTopAdvancerDecliner` | Best / worst % on last refresh |
+| `expandHoldings` / `freeHoldings` | Dynamic array grow / free |
+| `findHoldingIndex` | Lookup ticker in holdings |
+| `drawLiveMarket` | Full market UI + footer |
+| `computePortfolioTotals` | Today’s G/L aggregate |
+| `drawPortfolio` | Full portfolio UI + footer |
+| `addMoney` / `withdrawMoney` | Cash in / out with checks |
+| `addStock` / `removeStock` | Buy / sell with validations |
+| `savePortfolio` | Formatted `portfolio.txt` |
+| `ensureOwnerName` | Prompt once for investor name |
+| `main` | Owns all state; event loop |
+
+---
+
+## Project layout
+
+```text
+KarachiStockMarket_PF/
+├── 22i-2327_A_Project.cpp   # only source file (submission)
+├── companies.txt            # market CSV (read + overwritten on exit)
+├── portfolio.txt            # last saved portfolio (iomanip)
+├── build.bat / run.bat      # build + launch helpers
+├── msvc_build.bat / msvc_run.bat
+├── README.md
+├── .vscode/                 # launch / tasks / IntelliSense
+└── docs/
+    ├── Project.pdf
+    ├── Project-self-evaluation-sheet.pdf
+    ├── portfolio-sample.txt
+    ├── starter.cpp          # original brief starter sketch
+    ├── generate_screenshots.py
+    └── screenshots/         # 01–30 PNG gallery (embedded below)
+```
+
+---
+
+## Build notes
+
+### MSVC (Build Tools / Visual Studio) — primary
+
+```bat
+build.bat
+```
+
+Equivalent after `vcvars64.bat`:
+
+```bat
+cl /EHsc /W3 /Fe:22i-2327_A_Project.exe 22i-2327_A_Project.cpp /link user32.lib
+```
+
+**Verified on this machine:** MSVC `cl` succeeds (`EXITCODE=0`).
+
+### MinGW (optional)
+
+```bat
+g++ -std=c++17 -O2 -o 22i-2327_A_Project.exe 22i-2327_A_Project.cpp
+```
+
+Requires MinGW with Windows headers (`windows.h`, `conio.h`).
+
+---
+
+## Suggested manual walkthrough (test plan)
+
+1. Start via `.\run.bat` — confirm 12 companies load and Live Market appears.
+2. Press **Enter** several times — Prev/Curr change; ↑/↓ update; high/low move; top advancer/decliner update.
+3. Press **M**, deposit cash (e.g. `500000`).
+4. Press **A**, buy `PSO` shares — cash drops; traded counter rises.
+5. Press **P** — enter name — holdings table shows G/L colors after another Enter refresh.
+6. Press **A** again to buy a second symbol — dynamic holdings expand.
+7. Press **R** to sell partial/full shares — validations for bad symbol / too many shares.
+8. Press **W** to withdraw — reject amounts above cash.
+9. Try invalid symbol on buy — error message, no crash.
+10. Press **E** — confirm `companies.txt` prices changed and `portfolio.txt` is formatted.
 
 ---
 
