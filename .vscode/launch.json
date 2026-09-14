@@ -2,25 +2,28 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Run C++ file",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${fileDirname}\\${fileBasenameNoExtension}.exe",
+      "args": [],
+      "cwd": "${fileDirname}",
+      "console": "externalTerminal",
+      "preLaunchTask": "MSVC: build active file",
+      "stopAtEntry": false,
+      "externalConsole": true
+    },
+    {
       "name": "Run KSE Simulator (external console)",
       "type": "cppvsdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/KSE_Simulator.exe",
+      "program": "${workspaceFolder}\\22i-2327_A_Project.exe",
       "args": [],
       "cwd": "${workspaceFolder}",
       "console": "externalTerminal",
       "preLaunchTask": "build KSE Simulator",
-      "stopAtEntry": false
-    },
-    {
-      "name": "Run KSE Simulator (no rebuild)",
-      "type": "cppvsdbg",
-      "request": "launch",
-      "program": "${workspaceFolder}/KSE_Simulator.exe",
-      "args": [],
-      "cwd": "${workspaceFolder}",
-      "console": "externalTerminal",
-      "stopAtEntry": false
+      "stopAtEntry": false,
+      "externalConsole": true
     }
   ]
 }

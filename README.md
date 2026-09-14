@@ -14,47 +14,46 @@ This README documents **every major piece** of the project: constraints, rubric 
 
 ---
 
-## How to run in Cursor (important)
+## How to run (Cursor / VS Code / any editor)
 
-This app uses Windows console APIs (`system("cls")`, `_getch()`, colored text). The **Cursor integrated terminal** often looks “stuck”, blank, or unresponsive after clear-screen — that is normal for this style of program.
+This app uses Windows console APIs (`system("cls")`, `_getch()`, colored text). It must open in a **real Windows console**, not only the integrated panel — otherwise it can look blank or “stuck”.
 
-### Fastest way (recommended)
+### Click the Run ▶ button (recommended)
 
-1. Open the folder `KarachiStockMarket_PF` in Cursor.
-2. In the terminal (project root), run:
+1. Open `22i-2327_A_Project.cpp` (keep this file focused).
+2. In the **Run and Debug** dropdown (top / sidebar), select **`Run C++ file`**.
+3. Click the green **Run ▶** button, or press **F5**.
+
+What happens automatically:
+
+- MSVC environment loads (`vcvars64`)
+- The **open `.cpp` file** is compiled to `22i-2327_A_Project.exe` in the same folder
+- A **new external console** starts with `cwd` = that folder (so `companies.txt` is found)
+
+**Code Runner** users: the ▶ **Run Code** button also works — workspace settings call `.vscode/msvc_run.bat` for the active file.
+
+### Other ways
 
 ```bat
 .\run.bat
 ```
 
-This opens a **new Windows console window** where Enter / P / A / R / M / E work correctly.
-
-### Or use F5 / Run and Debug
-
-1. Open `22i-2327_A_Project.cpp`.
-2. Press **F5**, or open **Run and Debug** → choose **Run KSE Simulator (external console)**.
-3. Cursor builds with `build.bat`, then launches `KSE_Simulator.exe` in an **external** console with the correct working directory (so `companies.txt` is found).
-
-### Manual build + run
-
 ```bat
 build.bat
-KSE_Simulator.exe
+22i-2327_A_Project.exe
 ```
 
-Always run from the project folder so relative paths resolve:
+Always keep `companies.txt` / `portfolio.txt` next to the `.exe` (project folder).
 
-- `companies.txt`
-- `portfolio.txt`
+### If Run ▶ still fails
 
-### If it still “does nothing”
-
-| Symptom | Cause | Fix |
-|---------|--------|-----|
-| Blank / frozen after start | Integrated terminal + `cls` / `_getch` | Use `.\run.bat` or F5 external console |
-| `No companies loaded` | Wrong working directory | Run from project root; use launch.json / `run.bat` |
-| Build fails | MSVC not installed / `vcvars` path wrong | Install **Visual Studio Build Tools** with C++ workload; edit `build.bat` if VS is elsewhere |
-| Keys ignored | App waiting for key in another window | Focus the **external** console window |
+| Symptom | Fix |
+|---------|-----|
+| `cl.exe` / not recognized | Install **VS Build Tools** (C++ workload). Scripts auto-find `vcvars64.bat`. |
+| Wrong config selected | Dropdown → **`Run C++ file`** (not an old auto-generated config) |
+| Blank / frozen UI | Use external console config (already set); focus the new window |
+| `No companies loaded` | Run the `.cpp` that lives **inside** `KarachiStockMarket_PF\` |
+| Keys ignored | Click the **external** console window |
 
 ---
 

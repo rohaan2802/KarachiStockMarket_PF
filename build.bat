@@ -1,5 +1,4 @@
 @echo off
-call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-cd /d "c:\Users\CodeTech\Desktop\cursor working space\KarachiStockMarket_PF"
-cl /EHsc /W3 /Fe:KSE_Simulator.exe 22i-2327_A_Project.cpp /link user32.lib
+call "%~dp0msvc_build.bat" "%~dp022i-2327_A_Project.cpp"
 echo EXITCODE=%ERRORLEVEL%
+exit /b %ERRORLEVEL%

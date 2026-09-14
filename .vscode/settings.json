@@ -1,0 +1,13 @@
+{
+  "code-runner.executorMap": {
+    "cpp": "call \"$workspaceRoot\\.vscode\\msvc_run.bat\" \"$fullFileName\"",
+    "c": "call \"$workspaceRoot\\.vscode\\msvc_run.bat\" \"$fullFileName\""
+  },
+  "code-runner.runInTerminal": true,
+  "code-runner.saveFileBeforeRun": true,
+  "code-runner.clearPreviousOutput": true,
+  "code-runner.preserveFocus": false,
+  "code-runner.cwd": "$dir",
+  "C_Cpp.default.cppStandard": "c++17",
+  "C_Cpp.default.externalConsole": true
+}
