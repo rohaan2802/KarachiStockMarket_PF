@@ -32,13 +32,20 @@ using namespace std;
 #define NAME_LEN 64
 #define OWNER_LEN 64
 
-/* Fixed column widths for portfolio.txt (header + every data row) */
+/* Fixed column widths for portfolio.txt AND console portfolio (must match) */
 #define COL_SYM 8
-#define COL_NAME 32
+#define COL_NAME 28
 #define COL_SHARES 10
 #define COL_PRICE 12
 #define COL_GL 14
 #define PORTFOLIO_LINE_WIDTH (COL_SYM + COL_NAME + COL_SHARES + COL_PRICE * 4 + COL_GL)
+
+/* Live market board columns */
+#define MKT_SYM 8
+#define MKT_NAME 34
+#define MKT_NUM 10
+#define MKT_CHG 5
+#define MKT_LINE_WIDTH (MKT_SYM + MKT_NAME + MKT_NUM * 4 + MKT_CHG)
 
 /* ---------- Console helpers (state passed in via HANDLE) ---------- */
 
@@ -128,6 +135,98 @@ void enableUtf8Console()
     SetConsoleCP(65001);
 }
 
+/* ---------- Fixed-width text helpers (exact column alignment) ---------- */
+
+string fitWidth(const char *s, int width)
+{
+    string t = (s == NULL) ? "" : s;
+    if (width < 1)
+        return "";
+    if ((int)t.size() > width)
+        t = t.substr(0, (size_t)width);
+    return t;
+}
+
+void printCellLeft(ostream &out, const char *s, int width)
+{
+    out << left << setfill(' ') << setw(width) << fitWidth(s, width);
+}
+
+void printCellRightText(ostream &out, const string &text, int width)
+{
+    string t = text;
+    if ((int)t.size() > width)
+        t = t.substr(0, (size_t)width);
+    out << right << setfill(' ') << setw(width) << t;
+}
+
+void printMoneyCell(ostream &out, double value, int width, bool showPlus)
+{
+    ostringstream cell;
+    cell << fixed << setprecision(2);
+    if (showPlus && value > 0.0001)
+        cell << "+";
+    cell << value;
+    printCellRightText(out, cell.str(), width);
+}
+
+void printGainLossFixed(HANDLE hConsole, double value, int width)
+{
+    ostringstream cell;
+    cell << fixed << setprecision(2);
+    if (value > 0.0001)
+        cell << "+" << value;
+    else
+        cell << value;
+    string t = cell.str();
+    if ((int)t.size() > width)
+        t = t.substr(0, (size_t)width);
+    while ((int)t.size() < width)
+        t = " " + t;
+
+    if (value > 0.0001)
+        setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    else if (value < -0.0001)
+        setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+    else
+        resetColor(hConsole);
+    cout << t;
+    resetColor(hConsole);
+}
+
+/* Always print a change marker so every row shows direction (ASCII = 1 column). */
+void printChangeArrow(HANDLE hConsole, double prev, double curr)
+{
+    cout << " ";
+    if (curr > prev + 0.0001)
+    {
+        setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        cout << right << setw(MKT_CHG - 1) << "^";
+    }
+    else if (curr < prev - 0.0001)
+    {
+        setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+        cout << right << setw(MKT_CHG - 1) << "v";
+    }
+    else
+    {
+        setAccentYellow(hConsole);
+        cout << right << setw(MKT_CHG - 1) << "-";
+    }
+    resetColor(hConsole);
+}
+
+bool isCancelToken(const char *s)
+{
+    if (s == NULL || s[0] == '\0')
+        return false;
+    if (strcmp(s, "0") == 0)
+        return true;
+    if (_stricmp(s, "back") == 0 || _stricmp(s, "b") == 0 || _stricmp(s, "cancel") == 0)
+        return true;
+    return false;
+}
+
 /* ---------- File / market data ---------- */
 
 int loadCompanies(const char *filename,
@@ -211,7 +310,8 @@ int findSymbolIndex(char symbols[][SYM_LEN], int companyCount, const char *query
     return -1;
 }
 
-/* Random price update: integer + fractional change, hard-capped at +/-15% of session start */
+/* Random price update: integer + fractional change, hard-capped at +/-15% of session start.
+ * Guarantees every stock moves at least 0.01 when the band allows (so arrows always appear). */
 void refreshAllPrices(double sessionStart[],
                       double prevPrice[],
                       double currPrice[],
@@ -224,7 +324,7 @@ void refreshAllPrices(double sessionStart[],
     {
         prevPrice[i] = currPrice[i];
 
-        int intDelta = (rand() % 7) - 3;          /* -3 .. +3 */
+        int intDelta = (rand() % 7) - 3;           /* -3 .. +3 */
         double fracDelta = (rand() % 100) / 100.0; /* 0.00 .. 0.99 */
         if (rand() % 2 == 0)
             fracDelta = -fracDelta;
@@ -239,6 +339,15 @@ void refreshAllPrices(double sessionStart[],
             candidate = minAllowed;
         if (candidate < 0.01)
             candidate = 0.01;
+
+        /* Force a visible tick when random move collapsed to "unchanged" */
+        if (fabs(candidate - prevPrice[i]) < 0.005)
+        {
+            if (prevPrice[i] + 0.01 <= maxAllowed + 0.0001)
+                candidate = prevPrice[i] + 0.01;
+            else if (prevPrice[i] - 0.01 >= minAllowed - 0.0001)
+                candidate = prevPrice[i] - 0.01;
+        }
 
         currPrice[i] = candidate;
 
@@ -350,50 +459,32 @@ void drawLiveMarket(HANDLE hConsole,
     setAccentYellow(hConsole);
     cout << "Show updates: Enter   | Portfolio: P | Add Stock: A | Remove: R | Add Money: M | Exit: E\n";
     cout << "Tip: Cash starts at Rs. 0 — press M to add money, then A to buy shares.\n";
+    cout << "Change: ^ = up   v = down   - = unchanged (every stock always shows a marker)\n";
     resetColor(hConsole);
     cout << "----------------------------------------------------------------------------------------\n";
 
     setAccentCyan(hConsole);
-    cout << left
-         << setw(8) << "Stocks"
-         << setw(36) << "Company Name"
-         << right
-         << setw(10) << "Prev"
-         << setw(10) << "Curr"
-         << setw(4) << " "
-         << setw(10) << "High"
-         << setw(10) << "Low" << endl;
+    printCellLeft(cout, "Stocks", MKT_SYM);
+    printCellLeft(cout, "Company Name", MKT_NAME);
+    printCellRightText(cout, "Prev", MKT_NUM);
+    printCellRightText(cout, "Curr", MKT_NUM);
+    printCellRightText(cout, "Chg", MKT_CHG);
+    printCellRightText(cout, "High", MKT_NUM);
+    printCellRightText(cout, "Low", MKT_NUM);
+    cout << endl;
     resetColor(hConsole);
     cout << "----------------------------------------------------------------------------------------\n";
 
     for (int i = 0; i < companyCount; i++)
     {
-        cout << left << setw(8) << symbols[i]
-             << setw(36) << names[i]
-             << right << fixed << setprecision(2)
-             << setw(10) << prevPrice[i]
-             << setw(10) << currPrice[i];
-
-        cout << " ";
-        if (currPrice[i] > prevPrice[i] + 0.0001)
-        {
-            setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-            cout << "\xE2\x86\x91"; /* UTF-8 ↑ */
-        }
-        else if (currPrice[i] < prevPrice[i] - 0.0001)
-        {
-            setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
-            cout << "\xE2\x86\x93"; /* UTF-8 ↓ */
-        }
-        else
-        {
-            cout << " ";
-        }
-        resetColor(hConsole);
-
-        cout << right << fixed << setprecision(2)
-             << setw(10) << highPrice[i]
-             << setw(10) << lowPrice[i] << endl;
+        printCellLeft(cout, symbols[i], MKT_SYM);
+        printCellLeft(cout, names[i], MKT_NAME);
+        printMoneyCell(cout, prevPrice[i], MKT_NUM, false);
+        printMoneyCell(cout, currPrice[i], MKT_NUM, false);
+        printChangeArrow(hConsole, prevPrice[i], currPrice[i]);
+        printMoneyCell(cout, highPrice[i], MKT_NUM, false);
+        printMoneyCell(cout, lowPrice[i], MKT_NUM, false);
+        cout << endl;
     }
 
     int adv = 0, dec = 0;
@@ -460,14 +551,15 @@ void drawPortfolio(HANDLE hConsole,
     cout << "----------------------------------------------------------------------------------------\n";
 
     setAccentCyan(hConsole);
-    cout << left << setw(COL_SYM) << "Stocks"
-         << left << setw(COL_NAME) << "Company Name"
-         << right << setw(COL_SHARES) << "Shares"
-         << right << setw(COL_PRICE) << "Current"
-         << right << setw(COL_PRICE) << "Previous"
-         << right << setw(COL_GL) << "Gain/Loss"
-         << right << setw(COL_PRICE) << "High"
-         << right << setw(COL_PRICE) << "Low" << endl;
+    printCellLeft(cout, "Stocks", COL_SYM);
+    printCellLeft(cout, "Company Name", COL_NAME);
+    printCellRightText(cout, "Shares", COL_SHARES);
+    printCellRightText(cout, "Current", COL_PRICE);
+    printCellRightText(cout, "Previous", COL_PRICE);
+    printCellRightText(cout, "Gain/Loss", COL_GL);
+    printCellRightText(cout, "High", COL_PRICE);
+    printCellRightText(cout, "Low", COL_PRICE);
+    cout << endl;
     resetColor(hConsole);
     cout << "----------------------------------------------------------------------------------------\n";
 
@@ -476,7 +568,7 @@ void drawPortfolio(HANDLE hConsole,
     if (holdCount == 0)
     {
         cout << "  (No holdings yet — cash may be Rs. 0)\n";
-        cout << "  Step 1: press M and enter amount (e.g. 500000)\n";
+        cout << "  Step 1: press M and enter amount (e.g. 500000)  |  0 = cancel any form\n";
         cout << "  Step 2: press A, type a symbol (e.g. PSO), then share quantity\n";
     }
 
@@ -489,17 +581,19 @@ void drawPortfolio(HANDLE hConsole,
         double gl = (currPrice[idx] - prevPrice[idx]) * holdShares[h];
         todayGL += gl;
 
-        cout << left << setw(COL_SYM) << symbols[idx]
-             << left << setw(COL_NAME) << names[idx]
-             << right << setw(COL_SHARES) << holdShares[h]
-             << fixed << setprecision(2)
-             << right << setw(COL_PRICE) << currPrice[idx]
-             << right << setw(COL_PRICE) << prevPrice[idx]
-             << setw(1) << " ";
-        printGainLossColored(hConsole, gl);
-        cout << right << fixed << setprecision(2)
-             << setw(COL_PRICE) << highPrice[idx]
-             << setw(COL_PRICE) << lowPrice[idx] << endl;
+        printCellLeft(cout, symbols[idx], COL_SYM);
+        printCellLeft(cout, names[idx], COL_NAME);
+        {
+            ostringstream sh;
+            sh << holdShares[h];
+            printCellRightText(cout, sh.str(), COL_SHARES);
+        }
+        printMoneyCell(cout, currPrice[idx], COL_PRICE, false);
+        printMoneyCell(cout, prevPrice[idx], COL_PRICE, false);
+        printGainLossFixed(hConsole, gl, COL_GL);
+        printMoneyCell(cout, highPrice[idx], COL_PRICE, false);
+        printMoneyCell(cout, lowPrice[idx], COL_PRICE, false);
+        cout << endl;
     }
 
     double previousBalance = balance;
@@ -507,7 +601,7 @@ void drawPortfolio(HANDLE hConsole,
 
     cout << "----------------------------------------------------------------------------------------\n";
     cout << "Today's Gain or Loss (Rs.) : ";
-    printGainLossColored(hConsole, todayGL);
+    printGainLossFixed(hConsole, todayGL, COL_GL);
     cout << endl;
     resetColor(hConsole);
     cout << "Previous Balance (Rs.)     : " << fixed << setprecision(2) << previousBalance << endl;
@@ -524,13 +618,26 @@ void drawPortfolio(HANDLE hConsole,
 
 void addMoney(double &balance)
 {
-    cout << "\nEnter amount to add (Rs.): ";
+    cout << "\nEnter amount to add (Rs.)  [0 = Cancel]: ";
     double amount;
     cin >> amount;
-    if (cin.fail() || amount <= 0)
+    if (cin.fail())
     {
         cin.clear();
         cin.ignore(10000, '\n');
+        cout << "Invalid amount. Press any key...";
+        _getch();
+        return;
+    }
+    cin.ignore(10000, '\n');
+    if (amount == 0)
+    {
+        cout << "Cancelled. Press any key...";
+        _getch();
+        return;
+    }
+    if (amount < 0)
+    {
         cout << "Invalid amount. Press any key...";
         _getch();
         return;
@@ -544,13 +651,26 @@ void addMoney(double &balance)
 
 void withdrawMoney(double &balance)
 {
-    cout << "\nEnter amount to withdraw (Rs.): ";
+    cout << "\nEnter amount to withdraw (Rs.)  [0 = Cancel]: ";
     double amount;
     cin >> amount;
-    if (cin.fail() || amount <= 0)
+    if (cin.fail())
     {
         cin.clear();
         cin.ignore(10000, '\n');
+        cout << "Invalid amount. Press any key...";
+        _getch();
+        return;
+    }
+    cin.ignore(10000, '\n');
+    if (amount == 0)
+    {
+        cout << "Cancelled. Press any key...";
+        _getch();
+        return;
+    }
+    if (amount < 0)
+    {
         cout << "Invalid amount. Press any key...";
         _getch();
         return;
@@ -591,8 +711,16 @@ void addStock(char symbols[][SYM_LEN],
         if (i + 1 < companyCount)
             cout << ", ";
     }
-    cout << "\nEnter stock symbol to BUY: ";
+    cout << "\nEnter stock symbol to BUY  [0 = Cancel]: ";
     cin >> symbol;
+    cin.ignore(10000, '\n');
+
+    if (isCancelToken(symbol))
+    {
+        cout << "Cancelled. Press any key...";
+        _getch();
+        return;
+    }
 
     int mIdx = findSymbolIndex(symbols, companyCount, symbol);
     if (mIdx < 0)
@@ -606,13 +734,26 @@ void addStock(char symbols[][SYM_LEN],
 
     cout << "Current price of " << symbols[mIdx] << " (" << names[mIdx]
          << "): Rs. " << fixed << setprecision(2) << currPrice[mIdx] << endl;
-    cout << "Enter number of shares to buy: ";
+    cout << "Enter number of shares to buy  [0 = Cancel]: ";
     cin >> shares;
-
-    if (cin.fail() || shares <= 0)
+    if (cin.fail())
     {
         cin.clear();
         cin.ignore(10000, '\n');
+        cout << "Invalid share quantity.\n";
+        cout << "Press any key to continue...";
+        _getch();
+        return;
+    }
+    cin.ignore(10000, '\n');
+    if (shares == 0)
+    {
+        cout << "Cancelled. Press any key...";
+        _getch();
+        return;
+    }
+    if (shares < 0)
+    {
         cout << "Invalid share quantity.\n";
         cout << "Press any key to continue...";
         _getch();
@@ -687,8 +828,16 @@ void removeStock(char symbols[][SYM_LEN],
         if (i + 1 < holdCount)
             cout << ", ";
     }
-    cout << "\nEnter stock symbol to SELL: ";
+    cout << "\nEnter stock symbol to SELL  [0 = Cancel]: ";
     cin >> symbol;
+    cin.ignore(10000, '\n');
+
+    if (isCancelToken(symbol))
+    {
+        cout << "Cancelled. Press any key...";
+        _getch();
+        return;
+    }
 
     int hIdx = findHoldingIndex(holdSymbols, holdCount, symbol);
     if (hIdx < 0)
@@ -701,13 +850,26 @@ void removeStock(char symbols[][SYM_LEN],
 
     int mIdx = findSymbolIndex(symbols, companyCount, holdSymbols[hIdx]);
     cout << "Current price: Rs. " << fixed << setprecision(2) << currPrice[mIdx] << endl;
-    cout << "You own " << holdShares[hIdx] << " shares. Enter shares to sell: ";
+    cout << "You own " << holdShares[hIdx] << " shares. Enter shares to sell  [0 = Cancel]: ";
     cin >> shares;
-
-    if (cin.fail() || shares <= 0)
+    if (cin.fail())
     {
         cin.clear();
         cin.ignore(10000, '\n');
+        cout << "Invalid share quantity.\n";
+        cout << "Press any key to continue...";
+        _getch();
+        return;
+    }
+    cin.ignore(10000, '\n');
+    if (shares == 0)
+    {
+        cout << "Cancelled. Press any key...";
+        _getch();
+        return;
+    }
+    if (shares < 0)
+    {
         cout << "Invalid share quantity.\n";
         cout << "Press any key to continue...";
         _getch();
@@ -753,7 +915,7 @@ void writeAlignedMoney(ostream &out, double value, int width, bool showPlus)
     if (showPlus && value > 0.0001)
         cell << "+";
     cell << value;
-    out << right << setw(width) << cell.str();
+    printCellRightText(out, cell.str(), width);
 }
 
 void writePortfolioSeparator(ostream &out)
@@ -763,15 +925,15 @@ void writePortfolioSeparator(ostream &out)
 
 void writePortfolioHeaderRow(ostream &out)
 {
-    out << left << setw(COL_SYM) << "Stocks"
-        << left << setw(COL_NAME) << "Company Name"
-        << right << setw(COL_SHARES) << "Shares"
-        << right << setw(COL_PRICE) << "Close"
-        << right << setw(COL_PRICE) << "Previous"
-        << right << setw(COL_GL) << "Gain/Loss"
-        << right << setw(COL_PRICE) << "High"
-        << right << setw(COL_PRICE) << "Low"
-        << "\n";
+    printCellLeft(out, "Stocks", COL_SYM);
+    printCellLeft(out, "Company Name", COL_NAME);
+    printCellRightText(out, "Shares", COL_SHARES);
+    printCellRightText(out, "Close", COL_PRICE);
+    printCellRightText(out, "Previous", COL_PRICE);
+    printCellRightText(out, "Gain/Loss", COL_GL);
+    printCellRightText(out, "High", COL_PRICE);
+    printCellRightText(out, "Low", COL_PRICE);
+    out << "\n";
 }
 
 void writePortfolioDataRow(ostream &out,
@@ -784,17 +946,19 @@ void writePortfolioDataRow(ostream &out,
                            double high,
                            double low)
 {
-    out << left << setw(COL_SYM) << symbol
-        << left << setw(COL_NAME) << companyName
-        << right << setw(COL_SHARES) << shares
-        << fixed << setprecision(2)
-        << right << setw(COL_PRICE) << closePrice
-        << right << setw(COL_PRICE) << previousPrice;
+    printCellLeft(out, symbol, COL_SYM);
+    printCellLeft(out, companyName, COL_NAME);
+    {
+        ostringstream sh;
+        sh << shares;
+        printCellRightText(out, sh.str(), COL_SHARES);
+    }
+    printMoneyCell(out, closePrice, COL_PRICE, false);
+    printMoneyCell(out, previousPrice, COL_PRICE, false);
     writeAlignedMoney(out, gainLoss, COL_GL, true);
-    out << fixed << setprecision(2)
-        << right << setw(COL_PRICE) << high
-        << right << setw(COL_PRICE) << low
-        << "\n";
+    printMoneyCell(out, high, COL_PRICE, false);
+    printMoneyCell(out, low, COL_PRICE, false);
+    out << "\n";
 }
 
 void writePortfolioFooterLine(ostream &out, const char *label, double value)
@@ -874,11 +1038,11 @@ void ensureOwnerName(char ownerName[])
 {
     if (ownerName[0] == '\0' || strcmp(ownerName, "(empty)") == 0)
     {
-        cout << "\nEnter portfolio owner name: ";
-        cin.ignore(10000, '\n');
+        cout << "\nEnter portfolio owner name  [0 = use Investor / Cancel default]: ";
         cin.getline(ownerName, OWNER_LEN);
-        if (ownerName[0] == '\0')
+        if (ownerName[0] == '\0' || isCancelToken(ownerName))
             strncpy(ownerName, "Investor", OWNER_LEN - 1);
+        ownerName[OWNER_LEN - 1] = '\0';
     }
 }
 
@@ -927,6 +1091,10 @@ int main()
     cout << "\nPress any key to open Live Market...";
     resetColor(hConsole);
     _getch();
+
+    /* First tick so Prev/Curr differ and every stock shows ^ / v on open (no Enter needed). */
+    refreshAllPrices(sessionStart, prevPrice, currPrice,
+                     highPrice, lowPrice, pctChange, companyCount);
 
     char ownerName[OWNER_LEN] = "(empty)";
     double balance = 0.0;
