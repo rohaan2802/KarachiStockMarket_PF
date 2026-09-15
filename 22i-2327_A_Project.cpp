@@ -26,6 +26,16 @@
 #include <conio.h>
 #include <windows.h>
 
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
+#ifndef ENABLE_QUICK_EDIT_MODE
+#define ENABLE_QUICK_EDIT_MODE 0x0040
+#endif
+#ifndef ENABLE_EXTENDED_FLAGS
+#define ENABLE_EXTENDED_FLAGS 0x0080
+#endif
+
 using namespace std;
 
 #define MAX_COMPANIES 50
@@ -33,41 +43,324 @@ using namespace std;
 #define NAME_LEN 64
 #define OWNER_LEN 64
 
-/* Fixed column widths — slightly compact so full table fits on screen. */
-#define COL_GAP 1
-#define COL_SYM 7
-#define COL_NAME 22
-#define COL_SHARES 10
-#define COL_PRICE 14
-#define COL_GL 12
-#define PORTFOLIO_COLS 8
-#define PORTFOLIO_LINE_WIDTH (COL_SYM + COL_NAME + COL_SHARES + COL_PRICE * 4 + COL_GL + COL_GAP * (PORTFOLIO_COLS - 1))
-
-/* Live market board columns */
-#define MKT_SYM 7
-#define MKT_NAME 24
+/* Market board — widths fit FULL header names (no clipped letters). */
+#define COL_GAP 2
+#define MKT_SYM 8
+#define MKT_NAME 28
 #define MKT_NUM 14
-#define MKT_CHG 5
+#define MKT_CHG 6
 #define MKT_COLS 7
 #define MKT_LINE_WIDTH (MKT_SYM + MKT_NAME + MKT_NUM * 4 + MKT_CHG + COL_GAP * (MKT_COLS - 1))
+/* Buffer must stay wider than Live Market row or columns wrap to next line. */
+#define MIN_CONSOLE_COLS ((MKT_LINE_WIDTH) + 8)
+
+/* Portfolio console table (compact). File uses separate block format. */
+#define PF_GAP 1
+#define PF_SYM 6
+#define PF_NAME 24
+#define PF_QTY 6
+#define PF_NUM 9
+#define PORTFOLIO_COLS 8
+#define PORTFOLIO_LINE_WIDTH (PF_SYM + PF_NAME + PF_QTY + PF_NUM * 5 + PF_GAP * (PORTFOLIO_COLS - 1))
+#define PF_LABEL_W 20
+#define PF_FILE_WIDTH 60
 
 /* ---------- Console helpers (state passed in via HANDLE) ---------- */
 
+void setColor(HANDLE hConsole, WORD attributes);
+void resetColor(HANDLE hConsole);
+void setAccentCyan(HANDLE hConsole);
+void setAccentYellow(HANDLE hConsole);
+void setFontBold(HANDLE hConsole, int height = 24);
+void clearScreen();
+void ensureWideScrollableBuffer(HANDLE hOut);
+void snapConsoleToFontGrid(HANDLE hOut);
+void fillRestOfWindowBlank(HANDLE hOut);
+void configureConsoleIO();
+void prepareTextInput();
+void printRuleLine(ostream &out, char fill, int width);
+
+void snapConsoleToFontGrid(HANDLE hOut)
+{
+    /*
+     * Bottom "reflection" = Windows showing a PARTIAL character row
+     * when client height (pixels) is not an exact multiple of font height.
+     * Trim leftover pixels so only full rows are visible.
+     */
+    HWND hwnd = GetConsoleWindow();
+    if (hwnd == NULL || hOut == NULL || hOut == INVALID_HANDLE_VALUE)
+        return;
+
+    CONSOLE_FONT_INFOEX fi;
+    ZeroMemory(&fi, sizeof(fi));
+    fi.cbSize = sizeof(fi);
+    if (!GetCurrentConsoleFontEx(hOut, FALSE, &fi))
+        return;
+
+    int fontH = fi.dwFontSize.Y;
+    int fontW = fi.dwFontSize.X;
+    if (fontH <= 0)
+        return;
+    if (fontW <= 0)
+        fontW = (fontH > 1) ? (fontH / 2) : 8;
+    if (fontW <= 0)
+        fontW = 8;
+
+    RECT rcClient;
+    RECT rcWindow;
+    if (!GetClientRect(hwnd, &rcClient) || !GetWindowRect(hwnd, &rcWindow))
+        return;
+
+    int clientW = rcClient.right - rcClient.left;
+    int clientH = rcClient.bottom - rcClient.top;
+    if (clientW <= 0 || clientH <= 0)
+        return;
+
+    int trimW = clientW % fontW;
+    int trimH = clientH % fontH;
+    if (trimW == 0 && trimH == 0)
+        return;
+
+    int newOuterW = (rcWindow.right - rcWindow.left) - trimW;
+    int newOuterH = (rcWindow.bottom - rcWindow.top) - trimH;
+    if (newOuterW < 200)
+        newOuterW = rcWindow.right - rcWindow.left;
+    if (newOuterH < 200)
+        newOuterH = rcWindow.bottom - rcWindow.top;
+
+    SetWindowPos(hwnd, NULL, rcWindow.left, rcWindow.top, newOuterW, newOuterH,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void fillRestOfWindowBlank(HANDLE hOut)
+{
+    /*
+     * Blank every cell below the prompt (and one row past the window).
+     * Uses black-on-black so a partial pixel row cannot show yellow glyph tops.
+     * Does NOT erase the prompt on the current line.
+     */
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (!GetConsoleScreenBufferInfo(hOut, &csbi))
+        return;
+
+    SHORT left = csbi.srWindow.Left;
+    SHORT right = csbi.srWindow.Right;
+    SHORT bottom = csbi.srWindow.Bottom;
+    SHORT curX = csbi.dwCursorPosition.X;
+    SHORT curY = csbi.dwCursorPosition.Y;
+    SHORT width = static_cast<SHORT>(right - left + 1);
+    if (width < 1)
+        return;
+
+    WORD blankAttr = 0x00;
+    DWORD written = 0;
+
+    if (curY >= csbi.srWindow.Top && curY <= bottom && curX <= right)
+    {
+        COORD pos = { curX, curY };
+        DWORD n = static_cast<DWORD>(right - curX + 1);
+        FillConsoleOutputCharacterA(hOut, ' ', n, pos, &written);
+        FillConsoleOutputAttribute(hOut, blankAttr, n, pos, &written);
+    }
+
+    for (SHORT y = static_cast<SHORT>(curY + 1); y <= bottom; y++)
+    {
+        COORD pos = { left, y };
+        FillConsoleOutputCharacterA(hOut, ' ', (DWORD)width, pos, &written);
+        FillConsoleOutputAttribute(hOut, blankAttr, (DWORD)width, pos, &written);
+    }
+
+    if (bottom + 1 < csbi.dwSize.Y)
+    {
+        COORD pos = { left, static_cast<SHORT>(bottom + 1) };
+        FillConsoleOutputCharacterA(hOut, ' ', (DWORD)width, pos, &written);
+        FillConsoleOutputAttribute(hOut, blankAttr, (DWORD)width, pos, &written);
+    }
+
+    SetConsoleTextAttribute(hOut,
+        FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+    COORD restore = { curX, curY };
+    SetConsoleCursorPosition(hOut, restore);
+}
+
+void ensureWideScrollableBuffer(HANDLE hOut)
+{
+    if (hOut == NULL || hOut == INVALID_HANDLE_VALUE)
+        return;
+
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (!GetConsoleScreenBufferInfo(hOut, &csbi))
+        return;
+
+    SHORT winW = static_cast<SHORT>(csbi.srWindow.Right - csbi.srWindow.Left + 1);
+    SHORT winH = static_cast<SHORT>(csbi.srWindow.Bottom - csbi.srWindow.Top + 1);
+    if (winW < 80) winW = 80;
+    if (winH < 25) winH = 25;
+
+    /* Wide enough for Live Market row; tall enough to scroll, not huge. */
+    SHORT bufW = winW;
+    if (bufW < (SHORT)MIN_CONSOLE_COLS)
+        bufW = (SHORT)MIN_CONSOLE_COLS;
+
+    SHORT bufH = static_cast<SHORT>(winH * 8);
+    if (bufH < 400)
+        bufH = 400;
+    if (bufH > 2000)
+        bufH = 2000;
+
+    COORD bufferSize = { bufW, bufH };
+    SetConsoleScreenBufferSize(hOut, bufferSize);
+
+    SHORT viewW = winW;
+    if (viewW > bufW)
+        viewW = bufW;
+    SHORT viewH = winH;
+    if (viewH > bufH)
+        viewH = bufH;
+
+    SMALL_RECT view = { 0, 0, static_cast<SHORT>(viewW - 1), static_cast<SHORT>(viewH - 1) };
+    SetConsoleWindowInfo(hOut, TRUE, &view);
+}
+
+void configureConsoleIO()
+{
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+
+    DWORD outMode = 0;
+    if (GetConsoleMode(hOut, &outMode))
+    {
+        outMode |= ENABLE_PROCESSED_OUTPUT;
+        SetConsoleMode(hOut, outMode);
+    }
+
+    DWORD inMode = 0;
+    if (GetConsoleMode(hIn, &inMode))
+    {
+        inMode |= ENABLE_EXTENDED_FLAGS;
+        inMode &= ~ENABLE_QUICK_EDIT_MODE; /* selection ghosts while typing */
+        inMode |= ENABLE_PROCESSED_INPUT;
+        inMode |= ENABLE_LINE_INPUT;
+        inMode |= ENABLE_ECHO_INPUT;
+        SetConsoleMode(hIn, inMode);
+    }
+
+    ios::sync_with_stdio(true);
+    cout.flush();
+    cin.clear();
+}
+
 void clearScreen()
 {
-    system("cls");
+    /*
+     * Permanent, safe clear (no new problems):
+     *  - Does NOT create a new console buffer (that caused blank screen)
+     *  - Does NOT shrink buffer to window height (that locked scrollbar)
+     *  - Does NOT freopen CONOUT$ (that wrapped Live Market to ~80 cols)
+     *  - Scrolls ALL old text (including typed echo) off the buffer, then homes cursor
+     */
+    cout.flush();
+    fflush(stdout);
+    cin.clear();
+
+    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    FlushConsoleInputBuffer(hIn);
+
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (!GetConsoleScreenBufferInfo(hOut, &csbi))
+    {
+        system("cls");
+        return;
+    }
+
+    WORD attr = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+    CHAR_INFO fill;
+    fill.Char.AsciiChar = ' ';
+    fill.Attributes = attr;
+
+    /* Push every character off the buffer — removes typed-text reflection permanently. */
+    SMALL_RECT scrollRect;
+    scrollRect.Left = 0;
+    scrollRect.Top = 0;
+    scrollRect.Right = static_cast<SHORT>(csbi.dwSize.X - 1);
+    scrollRect.Bottom = static_cast<SHORT>(csbi.dwSize.Y - 1);
+    COORD dest = { 0, static_cast<SHORT>(-csbi.dwSize.Y) };
+    ScrollConsoleScreenBufferA(hOut, &scrollRect, NULL, dest, &fill);
+
+    /* Extra fill for anything left at the top. */
+    COORD origin = { 0, 0 };
+    DWORD cells = static_cast<DWORD>(csbi.dwSize.X) * static_cast<DWORD>(csbi.dwSize.Y);
+    DWORD written = 0;
+    FillConsoleOutputCharacterA(hOut, ' ', cells, origin, &written);
+    FillConsoleOutputAttribute(hOut, attr, cells, origin, &written);
+
+    SetConsoleTextAttribute(hOut, attr);
+    SetConsoleCursorPosition(hOut, origin);
+
+    /* Keep viewport at top; buffer height unchanged => scrollbar still works. */
+    SHORT winW = static_cast<SHORT>(csbi.srWindow.Right - csbi.srWindow.Left + 1);
+    SHORT winH = static_cast<SHORT>(csbi.srWindow.Bottom - csbi.srWindow.Top + 1);
+    if (winW < 1) winW = 80;
+    if (winH < 1) winH = 25;
+    if (winW > csbi.dwSize.X) winW = csbi.dwSize.X;
+    if (winH > csbi.dwSize.Y) winH = csbi.dwSize.Y;
+    SMALL_RECT topView = { 0, 0, static_cast<SHORT>(winW - 1), static_cast<SHORT>(winH - 1) };
+    SetConsoleWindowInfo(hOut, TRUE, &topView);
+}
+
+void showErrorMessage(HANDLE hConsole, const string &message)
+{
+    clearScreen();
+    setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+    cout << "\n\n";
+    printRuleLine(cout, '=', PF_FILE_WIDTH);
+    cout << "  ERROR\n";
+    printRuleLine(cout, '=', PF_FILE_WIDTH);
+    resetColor(hConsole);
+    cout << "\n" << message << "\n";
+    setAccentYellow(hConsole);
+    cout << "\nPress any key to continue...";
+    resetColor(hConsole);
+    cout.flush();
+    _getch();
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+    clearScreen();
+}
+
+void showInfoMessage(HANDLE hConsole, const string &message)
+{
+    clearScreen();
+    setAccentCyan(hConsole);
+    cout << "\n\n";
+    printRuleLine(cout, '=', PF_FILE_WIDTH);
+    cout << "  NOTICE\n";
+    printRuleLine(cout, '=', PF_FILE_WIDTH);
+    resetColor(hConsole);
+    cout << "\n" << message << "\n";
+    setAccentYellow(hConsole);
+    cout << "\nPress any key to continue...";
+    resetColor(hConsole);
+    cout.flush();
+    _getch();
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+    clearScreen();
 }
 
 void setColor(HANDLE hConsole, WORD attributes)
 {
-    /* Keep black background (low nibble only = FG); dark theme. */
-    SetConsoleTextAttribute(hConsole, static_cast<WORD>(attributes & 0x0F));
+    HANDLE h = (hConsole != NULL && hConsole != INVALID_HANDLE_VALUE)
+                   ? hConsole
+                   : GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(h, static_cast<WORD>(attributes & 0x0F));
 }
 
 void resetColor(HANDLE hConsole)
 {
-    /* Bright white on black — high contrast default */
-    SetConsoleTextAttribute(hConsole,
+    HANDLE h = (hConsole != NULL && hConsole != INVALID_HANDLE_VALUE)
+                   ? hConsole
+                   : GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(h,
         FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
 }
 
@@ -101,7 +394,7 @@ void printGainLossColored(HANDLE hConsole, double value)
     resetColor(hConsole);
 }
 
-void setFontBold(HANDLE hConsole, int height = 24)
+void setFontBold(HANDLE hConsole, int height)
 {
     CONSOLE_FONT_INFOEX fontInfo;
     fontInfo.cbSize = sizeof(CONSOLE_FONT_INFOEX);
@@ -119,8 +412,13 @@ void maximizeConsoleWindow()
     if (hwnd != NULL)
     {
         ShowWindow(hwnd, SW_MAXIMIZE);
-        Sleep(50); /* let maximize apply before font/buffer layout */
+        Sleep(80); /* let maximize apply before font/buffer layout */
     }
+
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    ensureWideScrollableBuffer(hOut);
+    snapConsoleToFontGrid(hOut);
+    ensureWideScrollableBuffer(hOut); /* refresh cols/rows after pixel snap */
 }
 
 void enableDarkTheme(HANDLE hConsole)
@@ -129,7 +427,10 @@ void enableDarkTheme(HANDLE hConsole)
     system("color 0F");
     SetConsoleOutputCP(65001);
     SetConsoleCP(65001);
-    setFontBold(hConsole, 24);
+    configureConsoleIO();
+    setFontBold(hConsole, 22); /* slightly smaller than 24 — cleaner row fit */
+    snapConsoleToFontGrid(hConsole);
+    ensureWideScrollableBuffer(hConsole);
     resetColor(hConsole);
 }
 
@@ -165,10 +466,20 @@ string cellRight(const string &text, int width)
 {
     string t = text;
     if ((int)t.size() > width)
-        t = t.substr(0, (size_t)width);
+        t = t.substr((size_t)((int)t.size() - width)); /* keep rightmost digits */
     if ((int)t.size() < width)
         t.insert(0, static_cast<size_t>(width - (int)t.size()), ' ');
     return t;
+}
+
+string formatMoneyText(double value, bool showPlus)
+{
+    ostringstream cell;
+    cell << fixed << setprecision(2);
+    if (showPlus && value > 0.0001)
+        cell << "+";
+    cell << value;
+    return cell.str();
 }
 
 void printCellLeft(ostream &out, const char *s, int width)
@@ -181,7 +492,6 @@ void printCellRightText(ostream &out, const string &text, int width)
     out << cellRight(text, width);
 }
 
-/** Open spacing between columns (not congested). */
 void printColGap(ostream &out)
 {
     out << string(static_cast<size_t>(COL_GAP), ' ');
@@ -196,23 +506,12 @@ void printRuleLine(ostream &out, char fill, int width)
 
 void printMoneyCell(ostream &out, double value, int width, bool showPlus)
 {
-    ostringstream cell;
-    cell << fixed << setprecision(2);
-    if (showPlus && value > 0.0001)
-        cell << "+";
-    cell << value;
-    out << cellRight(cell.str(), width);
+    out << cellRight(formatMoneyText(value, showPlus), width);
 }
 
 void printGainLossFixed(HANDLE hConsole, double value, int width)
 {
-    ostringstream cell;
-    cell << fixed << setprecision(2);
-    if (value > 0.0001)
-        cell << "+" << value;
-    else
-        cell << value;
-    string t = cellRight(cell.str(), width);
+    string t = cellRight(formatMoneyText(value, true), width);
 
     if (value > 0.0001)
         setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
@@ -222,6 +521,125 @@ void printGainLossFixed(HANDLE hConsole, double value, int width)
         resetColor(hConsole);
     cout << t;
     resetColor(hConsole);
+}
+
+/** label : value for summary lines only. */
+void writeLabeled(ostream &out, const char *label, const string &value)
+{
+    out << left << setw(PF_LABEL_W) << label << " : " << value << "\n";
+    out.unsetf(ios_base::adjustfield);
+}
+
+void writeLabeledMoney(ostream &out, const char *label, double value, bool showPlus)
+{
+    writeLabeled(out, label, formatMoneyText(value, showPlus));
+}
+
+void writePortfolioFooterLine(ostream &out, const char *label, double value, bool showPlus)
+{
+    writeLabeledMoney(out, label, value, showPlus);
+}
+
+string buildPortfolioHeaderLine()
+{
+    string gap(static_cast<size_t>(PF_GAP), ' ');
+    return cellLeft("Sym", PF_SYM) + gap +
+           cellLeft("Company", PF_NAME) + gap +
+           cellRight("Qty", PF_QTY) + gap +
+           cellRight("Curr", PF_NUM) + gap +
+           cellRight("Prev", PF_NUM) + gap +
+           cellRight("G/L", PF_NUM) + gap +
+           cellRight("High", PF_NUM) + gap +
+           cellRight("Low", PF_NUM);
+}
+
+string buildPortfolioDataLine(const char *symbol,
+                              const char *companyName,
+                              int shares,
+                              double closePrice,
+                              double previousPrice,
+                              double gainLoss,
+                              double high,
+                              double low)
+{
+    ostringstream sh;
+    sh << shares;
+    string gap(static_cast<size_t>(PF_GAP), ' ');
+    return cellLeft(symbol, PF_SYM) + gap +
+           cellLeft(companyName, PF_NAME) + gap +
+           cellRight(sh.str(), PF_QTY) + gap +
+           cellRight(formatMoneyText(closePrice, false), PF_NUM) + gap +
+           cellRight(formatMoneyText(previousPrice, false), PF_NUM) + gap +
+           cellRight(formatMoneyText(gainLoss, true), PF_NUM) + gap +
+           cellRight(formatMoneyText(high, false), PF_NUM) + gap +
+           cellRight(formatMoneyText(low, false), PF_NUM);
+}
+
+void printPortfolioDataRowColored(HANDLE hConsole,
+                                  const char *symbol,
+                                  const char *companyName,
+                                  int shares,
+                                  double closePrice,
+                                  double previousPrice,
+                                  double gainLoss,
+                                  double high,
+                                  double low)
+{
+    /* unused table path kept for compatibility — console uses blocks */
+    (void)hConsole;
+    (void)symbol;
+    (void)companyName;
+    (void)shares;
+    (void)closePrice;
+    (void)previousPrice;
+    (void)gainLoss;
+    (void)high;
+    (void)low;
+}
+
+void printHoldingBlockColored(HANDLE hConsole,
+                              int index,
+                              const char *symbol,
+                              const char *companyName,
+                              int shares,
+                              double closePrice,
+                              double previousPrice,
+                              double gainLoss,
+                              double high,
+                              double low)
+{
+    cout << "\n";
+    printRuleLine(cout, '-', PF_FILE_WIDTH);
+    setAccentCyan(hConsole);
+    cout << "  HOLDING " << index << "\n";
+    resetColor(hConsole);
+    printRuleLine(cout, '-', PF_FILE_WIDTH);
+    cout << "\n";
+
+    writeLabeled(cout, "Symbol", symbol);
+    writeLabeled(cout, "Company Name", companyName);
+    {
+        ostringstream sh;
+        sh << shares;
+        writeLabeled(cout, "Shares Owned", sh.str());
+    }
+    writeLabeledMoney(cout, "Current Price", closePrice, false);
+    writeLabeledMoney(cout, "Previous Price", previousPrice, false);
+
+    cout << left << setw(PF_LABEL_W) << "Gain / Loss" << " : ";
+    cout.unsetf(ios_base::adjustfield);
+    if (gainLoss > 0.0001)
+        setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    else if (gainLoss < -0.0001)
+        setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+    else
+        resetColor(hConsole);
+    cout << formatMoneyText(gainLoss, true) << "\n";
+    resetColor(hConsole);
+
+    writeLabeledMoney(cout, "Highest Price", high, false);
+    writeLabeledMoney(cout, "Lowest Price", low, false);
+    cout << "\n";
 }
 
 /* Direction with arrow head + shaft: ↑ up, ↓ down, = unchanged. */
@@ -487,32 +905,34 @@ void drawLiveMarket(HANDLE hConsole,
                     long long totalSharesTraded)
 {
     clearScreen();
+    ensureWideScrollableBuffer(GetStdHandle(STD_OUTPUT_HANDLE));
     setAccentCyan(hConsole);
     printRuleLine(cout, '=', MKT_LINE_WIDTH);
     cout << "                        KARACHI STOCK MARKET (LIVE)\n";
     printRuleLine(cout, '=', MKT_LINE_WIDTH);
     setAccentYellow(hConsole);
     cout << "Show updates: Enter   | Portfolio: P | Add Stock: A | Remove: R | Add Money: M | Exit: E\n";
-    cout << "Tip: Press P to open Portfolio (create new or continue existing). Cash starts at Rs. 0.\n";
+    cout << "Tip: Press P first to create/open Portfolio. Without portfolio file, A/R/M are blocked.\n";
     cout << "Change: \"\xE2\x86\x91\" = up (rise)   \"\xE2\x86\x93\" = down (fall)   \"=\" = unchanged\n";
     resetColor(hConsole);
     cout << "\n";
     printRuleLine(cout, '-', MKT_LINE_WIDTH);
 
     setAccentCyan(hConsole);
+    /* Headers left-aligned so full names stay visible (not right-truncated). */
     printCellLeft(cout, "Symbol", MKT_SYM);
     printColGap(cout);
     printCellLeft(cout, "Company Name", MKT_NAME);
     printColGap(cout);
-    printCellRightText(cout, "Previous Price", MKT_NUM);
+    printCellLeft(cout, "Previous Price", MKT_NUM);
     printColGap(cout);
-    printCellRightText(cout, "Current Price", MKT_NUM);
+    printCellLeft(cout, "Current Price", MKT_NUM);
     printColGap(cout);
-    printCellRightText(cout, "Change", MKT_CHG);
+    printCellLeft(cout, "Change", MKT_CHG);
     printColGap(cout);
-    printCellRightText(cout, "Highest Price", MKT_NUM);
+    printCellLeft(cout, "Highest Price", MKT_NUM);
     printColGap(cout);
-    printCellRightText(cout, "Lowest Price", MKT_NUM);
+    printCellLeft(cout, "Lowest Price", MKT_NUM);
     cout << endl;
     resetColor(hConsole);
     printRuleLine(cout, '-', MKT_LINE_WIDTH);
@@ -557,6 +977,8 @@ void drawLiveMarket(HANDLE hConsole,
     cout << "Enter your choice: ";
     resetColor(hConsole);
     cout.flush();
+    fillRestOfWindowBlank(GetStdHandle(STD_OUTPUT_HANDLE));
+    snapConsoleToFontGrid(GetStdHandle(STD_OUTPUT_HANDLE));
 }
 
 void computePortfolioTotals(char **holdSymbols,
@@ -595,44 +1017,31 @@ void drawPortfolio(HANDLE hConsole,
 {
     clearScreen();
     setAccentCyan(hConsole);
-    printRuleLine(cout, '=', PORTFOLIO_LINE_WIDTH);
-    cout << "                     PORTFOLIO OWNER: " << ownerName << " (LIVE)\n";
-    printRuleLine(cout, '=', PORTFOLIO_LINE_WIDTH);
+    printRuleLine(cout, '=', PF_FILE_WIDTH);
+    cout << "  PORTFOLIO (LIVE)\n";
+    printRuleLine(cout, '=', PF_FILE_WIDTH);
+    resetColor(hConsole);
+    cout << "\n";
+    writeLabeled(cout, "Owner Name", ownerName);
+    writeLabeledMoney(cout, "Cash Available (Rs.)", balance, false);
+    cout << "\n";
     setAccentYellow(hConsole);
-    cout << "Owner name on this portfolio: " << ownerName << "\n";
-    cout << "Updates: Enter | Live Market: L | Add: A | Remove: R | Money: M | Withdraw: W\n";
+    cout << "Enter = refresh prices\n";
+    cout << "L = Live Market   A = Buy   R = Sell\n";
+    cout << "M = Add money     W = Withdraw money\n";
     resetColor(hConsole);
-    cout << "\n";
-    printRuleLine(cout, '-', PORTFOLIO_LINE_WIDTH);
-
-    setAccentCyan(hConsole);
-    printCellLeft(cout, "Symbol", COL_SYM);
-    printColGap(cout);
-    printCellLeft(cout, "Company Name", COL_NAME);
-    printColGap(cout);
-    printCellRightText(cout, "Share Qty", COL_SHARES);
-    printColGap(cout);
-    printCellRightText(cout, "Current Price", COL_PRICE);
-    printColGap(cout);
-    printCellRightText(cout, "Previous Price", COL_PRICE);
-    printColGap(cout);
-    printCellRightText(cout, "Gain / Loss", COL_GL);
-    printColGap(cout);
-    printCellRightText(cout, "Highest Price", COL_PRICE);
-    printColGap(cout);
-    printCellRightText(cout, "Lowest Price", COL_PRICE);
-    cout << endl;
-    resetColor(hConsole);
-    printRuleLine(cout, '-', PORTFOLIO_LINE_WIDTH);
-    cout << "\n";
 
     double todayGL = 0.0;
+    int shown = 0;
 
     if (holdCount == 0)
     {
-        cout << "  (No holdings yet — cash may be Rs. 0)\n";
-        cout << "  Step 1: press M and enter amount (e.g. 500000)  |  0 = cancel any form\n";
-        cout << "  Step 2: press A, type a symbol (e.g. PSO), then share quantity\n\n";
+        cout << "\n";
+        printRuleLine(cout, '-', PF_FILE_WIDTH);
+        cout << "\n  No shares owned yet.\n\n";
+        cout << "  Step 1: Press M and add money\n";
+        cout << "  Step 2: Press A and buy shares\n\n";
+        printRuleLine(cout, '-', PF_FILE_WIDTH);
     }
 
     for (int h = 0; h < holdCount; h++)
@@ -643,73 +1052,54 @@ void drawPortfolio(HANDLE hConsole,
 
         double gl = (currPrice[idx] - prevPrice[idx]) * holdShares[h];
         todayGL += gl;
-
-        printCellLeft(cout, symbols[idx], COL_SYM);
-        printColGap(cout);
-        printCellLeft(cout, names[idx], COL_NAME);
-        printColGap(cout);
-        {
-            ostringstream sh;
-            sh << holdShares[h];
-            printCellRightText(cout, sh.str(), COL_SHARES);
-        }
-        printColGap(cout);
-        printMoneyCell(cout, currPrice[idx], COL_PRICE, false);
-        printColGap(cout);
-        printMoneyCell(cout, prevPrice[idx], COL_PRICE, false);
-        printColGap(cout);
-        printGainLossFixed(hConsole, gl, COL_GL);
-        printColGap(cout);
-        printMoneyCell(cout, highPrice[idx], COL_PRICE, false);
-        printColGap(cout);
-        printMoneyCell(cout, lowPrice[idx], COL_PRICE, false);
-        cout << endl;
+        shown++;
+        printHoldingBlockColored(hConsole, shown, symbols[idx], names[idx],
+                                 holdShares[h], currPrice[idx], prevPrice[idx],
+                                 gl, highPrice[idx], lowPrice[idx]);
     }
 
     double previousBalance = balance;
     double newBalance = balance + todayGL;
 
-    cout << "\n";
-    printRuleLine(cout, '-', PORTFOLIO_LINE_WIDTH);
-    const int labW = 28;
-    const int valW = 14;
-    {
-        ostringstream v;
-        cout << cellLeft("Today's Gain or Loss (Rs.)", labW) << " : ";
-        printGainLossFixed(hConsole, todayGL, valW);
-        cout << endl;
-        resetColor(hConsole);
-        v.str("");
-        v.clear();
-        v << fixed << setprecision(2) << previousBalance;
-        cout << cellLeft("Previous Balance (Rs.)", labW) << " : " << cellRight(v.str(), valW) << endl;
-        v.str("");
-        v.clear();
-        v << fixed << setprecision(2) << newBalance;
-        setAccentYellow(hConsole);
-        cout << cellLeft("New Balance (Rs.)", labW) << " : " << cellRight(v.str(), valW) << endl;
-        resetColor(hConsole);
-        v.str("");
-        v.clear();
-        v << fixed << setprecision(2) << balance;
-        cout << cellLeft("Cash available (Rs.)", labW) << " : " << cellRight(v.str(), valW) << endl;
-    }
+    printRuleLine(cout, '=', PF_FILE_WIDTH);
     setAccentCyan(hConsole);
-    printRuleLine(cout, '=', PORTFOLIO_LINE_WIDTH);
+    cout << "  SUMMARY\n";
+    resetColor(hConsole);
+    printRuleLine(cout, '=', PF_FILE_WIDTH);
+    cout << "\n";
+
+    cout << left << setw(PF_LABEL_W) << "Today's Gain or Loss" << " : ";
+    cout.unsetf(ios_base::adjustfield);
+    printGainLossFixed(hConsole, todayGL, 14);
+    cout << endl;
+    resetColor(hConsole);
+    writePortfolioFooterLine(cout, "Previous Balance", previousBalance, false);
+    setAccentYellow(hConsole);
+    writePortfolioFooterLine(cout, "New Balance", newBalance, false);
+    resetColor(hConsole);
+    writePortfolioFooterLine(cout, "Cash Available", balance, false);
+    cout << "\n";
+    setAccentCyan(hConsole);
+    printRuleLine(cout, '=', PF_FILE_WIDTH);
     resetColor(hConsole);
     setAccentYellow(hConsole);
     cout << "Enter your choice: ";
     resetColor(hConsole);
     cout.flush();
+    fillRestOfWindowBlank(GetStdHandle(STD_OUTPUT_HANDLE));
+    snapConsoleToFontGrid(GetStdHandle(STD_OUTPUT_HANDLE));
 }
 
 /* ---------- Transactions ---------- */
 
 void addMoney(double &balance)
 {
-    cout << "\n----- ADD MONEY -----\n";
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    clearScreen();
+    prepareTextInput();
+    cout << "----- ADD MONEY -----\n\n";
     cout << "Enter the amount to add in Rs.\n";
-    cout << "Enter 0 to cancel and go back.\n";
+    cout << "Enter 0 to cancel and go back.\n\n";
     cout << "Amount: ";
     double amount;
     cin >> amount;
@@ -717,35 +1107,42 @@ void addMoney(double &balance)
     {
         cin.clear();
         cin.ignore(10000, '\n');
-        cout << "Invalid amount. Press any key...";
-        _getch();
+        showErrorMessage(hConsole, "Invalid amount.\nPlease enter a valid number (example: 50000).\nEnter 0 if you want to cancel.");
         return;
     }
     cin.ignore(10000, '\n');
     if (amount == 0)
     {
-        cout << "Cancelled. Press any key...";
-        _getch();
+        showInfoMessage(hConsole, "Add money cancelled.\nNo change was made to your balance.");
         return;
     }
     if (amount < 0)
     {
-        cout << "Invalid amount. Press any key...";
-        _getch();
+        showErrorMessage(hConsole, "Invalid amount.\nAmount cannot be negative.\nPlease try again with a positive value.");
         return;
     }
     balance += amount;
-    cout << "Added Rs. " << fixed << setprecision(2) << amount
-         << ". New cash balance: " << balance << endl;
-    cout << "Press any key to continue...";
+    clearScreen();
+    setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    cout << "\n\n[OK] Added Rs. " << fixed << setprecision(2) << amount << "\n";
+    resetColor(hConsole);
+    cout << "New cash balance: Rs. " << balance << endl;
+    setAccentYellow(hConsole);
+    cout << "\nPress any key to continue...";
+    resetColor(hConsole);
     _getch();
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+    clearScreen();
 }
 
 void withdrawMoney(double &balance)
 {
-    cout << "\n----- WITHDRAW MONEY -----\n";
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    clearScreen();
+    prepareTextInput();
+    cout << "----- WITHDRAW MONEY -----\n\n";
     cout << "Enter the amount to withdraw in Rs.\n";
-    cout << "Enter 0 to cancel and go back.\n";
+    cout << "Enter 0 to cancel and go back.\n\n";
     cout << "Amount: ";
     double amount;
     cin >> amount;
@@ -753,36 +1150,42 @@ void withdrawMoney(double &balance)
     {
         cin.clear();
         cin.ignore(10000, '\n');
-        cout << "Invalid amount. Press any key...";
-        _getch();
+        showErrorMessage(hConsole, "Invalid amount.\nPlease enter a valid number (example: 1000).\nEnter 0 if you want to cancel.");
         return;
     }
     cin.ignore(10000, '\n');
     if (amount == 0)
     {
-        cout << "Cancelled. Press any key...";
-        _getch();
+        showInfoMessage(hConsole, "Withdraw cancelled.\nNo change was made to your balance.");
         return;
     }
     if (amount < 0)
     {
-        cout << "Invalid amount. Press any key...";
-        _getch();
+        showErrorMessage(hConsole, "Invalid amount.\nAmount cannot be negative.");
         return;
     }
     if (amount > balance)
     {
-        cout << "Insufficient balance. Available: Rs. "
-             << fixed << setprecision(2) << balance << endl;
-        cout << "Press any key to continue...";
-        _getch();
+        ostringstream msg;
+        msg << fixed << setprecision(2)
+            << "Insufficient balance.\n"
+            << "You tried to withdraw: Rs. " << amount << "\n"
+            << "Available cash: Rs. " << balance;
+        showErrorMessage(hConsole, msg.str());
         return;
     }
     balance -= amount;
-    cout << "Withdrew Rs. " << fixed << setprecision(2) << amount
-         << ". New cash balance: " << balance << endl;
-    cout << "Press any key to continue...";
+    clearScreen();
+    setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    cout << "\n\n[OK] Withdrew Rs. " << fixed << setprecision(2) << amount << "\n";
+    resetColor(hConsole);
+    cout << "New cash balance: Rs. " << balance << endl;
+    setAccentYellow(hConsole);
+    cout << "\nPress any key to continue...";
+    resetColor(hConsole);
     _getch();
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+    clearScreen();
 }
 
 void addStock(char symbols[][SYM_LEN],
@@ -796,10 +1199,13 @@ void addStock(char symbols[][SYM_LEN],
               double &balance,
               long long &totalSharesTraded)
 {
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     char symbol[SYM_LEN];
     int shares;
 
-    cout << "\n----- BUY STOCK -----\n";
+    clearScreen();
+    prepareTextInput();
+    cout << "----- BUY STOCK -----\n\n";
     cout << "Available symbols: ";
     for (int i = 0; i < companyCount; i++)
     {
@@ -807,26 +1213,26 @@ void addStock(char symbols[][SYM_LEN],
         if (i + 1 < companyCount)
             cout << ", ";
     }
-    cout << "\nEnter the stock symbol you want to BUY.\n";
-    cout << "Enter 0 to cancel and go back.\n";
+    cout << "\n\nEnter the stock symbol you want to BUY.\n";
+    cout << "Enter 0 to cancel and go back.\n\n";
     cout << "Symbol: ";
     cin >> symbol;
     cin.ignore(10000, '\n');
 
     if (isCancelToken(symbol))
     {
-        cout << "Cancelled. Press any key...";
-        _getch();
+        showInfoMessage(hConsole, "Buy cancelled.\nNo shares were purchased.");
         return;
     }
 
     int mIdx = findSymbolIndex(symbols, companyCount, symbol);
     if (mIdx < 0)
     {
-        cout << "Invalid symbol \"" << symbol
-             << "\". Please choose a symbol from the list above.\n";
-        cout << "Press any key to continue...";
-        _getch();
+        ostringstream msg;
+        msg << "Invalid stock symbol: \"" << symbol << "\"\n"
+            << "Please enter a symbol from the available list.\n"
+            << "Example: PSO";
+        showErrorMessage(hConsole, msg.str());
         return;
     }
 
@@ -840,38 +1246,34 @@ void addStock(char symbols[][SYM_LEN],
     {
         cin.clear();
         cin.ignore(10000, '\n');
-        cout << "Invalid share quantity.\n";
-        cout << "Press any key to continue...";
-        _getch();
+        showErrorMessage(hConsole, "Invalid share quantity.\nPlease enter a whole number (example: 10).\nEnter 0 to cancel.");
         return;
     }
     cin.ignore(10000, '\n');
     if (shares == 0)
     {
-        cout << "Cancelled. Press any key...";
-        _getch();
+        showInfoMessage(hConsole, "Buy cancelled.\nNo shares were purchased.");
         return;
     }
     if (shares < 0)
     {
-        cout << "Invalid share quantity.\n";
-        cout << "Press any key to continue...";
-        _getch();
+        showErrorMessage(hConsole, "Invalid share quantity.\nShares cannot be negative.");
         return;
     }
 
     double cost = currPrice[mIdx] * shares;
     if (cost > balance)
     {
-        cout << "Insufficient balance.\n";
-        cout << "  Required : Rs. " << fixed << setprecision(2) << cost << endl;
-        cout << "  Available: Rs. " << balance << endl;
+        ostringstream msg;
+        msg << fixed << setprecision(2)
+            << "Insufficient balance to buy.\n"
+            << "Required : Rs. " << cost << "\n"
+            << "Available: Rs. " << balance << "\n";
         if (balance <= 0.0001)
-            cout << "  Tip: Press M first to ADD MONEY, then press A again to buy.\n";
+            msg << "Tip: Press M to add money first, then press A to buy.";
         else
-            cout << "  Tip: Press M to add more cash, or buy fewer shares.\n";
-        cout << "Press any key to continue...";
-        _getch();
+            msg << "Tip: Add more money (M) or buy fewer shares.";
+        showErrorMessage(hConsole, msg.str());
         return;
     }
 
@@ -893,11 +1295,18 @@ void addStock(char symbols[][SYM_LEN],
     balance -= cost;
     totalSharesTraded += shares;
 
-    cout << "Bought " << shares << " shares of " << symbols[mIdx]
-         << " for Rs. " << fixed << setprecision(2) << cost << endl;
+    clearScreen();
+    setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    cout << "\n\n[OK] Bought " << shares << " shares of " << symbols[mIdx] << "\n";
+    resetColor(hConsole);
+    cout << "Cost: Rs. " << fixed << setprecision(2) << cost << endl;
     cout << "Remaining cash: Rs. " << balance << endl;
-    cout << "Press any key to continue...";
+    setAccentYellow(hConsole);
+    cout << "\nPress any key to continue...";
+    resetColor(hConsole);
     _getch();
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+    clearScreen();
 }
 
 void removeStock(char symbols[][SYM_LEN],
@@ -910,18 +1319,19 @@ void removeStock(char symbols[][SYM_LEN],
                  double &balance,
                  long long &totalSharesTraded)
 {
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     if (holdCount == 0)
     {
-        cout << "\nPortfolio is empty. Nothing to sell.\n";
-        cout << "Press any key to continue...";
-        _getch();
+        showErrorMessage(hConsole, "Portfolio is empty.\nThere are no shares to sell.\nBuy shares first with A, then try again.");
         return;
     }
 
     char symbol[SYM_LEN];
     int shares;
 
-    cout << "\n----- SELL STOCK -----\n";
+    clearScreen();
+    prepareTextInput();
+    cout << "----- SELL STOCK -----\n\n";
     cout << "Your holdings: ";
     for (int i = 0; i < holdCount; i++)
     {
@@ -929,25 +1339,25 @@ void removeStock(char symbols[][SYM_LEN],
         if (i + 1 < holdCount)
             cout << ", ";
     }
-    cout << "\nEnter the stock symbol you want to SELL.\n";
-    cout << "Enter 0 to cancel and go back.\n";
+    cout << "\n\nEnter the stock symbol you want to SELL.\n";
+    cout << "Enter 0 to cancel and go back.\n\n";
     cout << "Symbol: ";
     cin >> symbol;
     cin.ignore(10000, '\n');
 
     if (isCancelToken(symbol))
     {
-        cout << "Cancelled. Press any key...";
-        _getch();
+        showInfoMessage(hConsole, "Sell cancelled.\nNo shares were sold.");
         return;
     }
 
     int hIdx = findHoldingIndex(holdSymbols, holdCount, symbol);
     if (hIdx < 0)
     {
-        cout << "You do not hold symbol \"" << symbol << "\".\n";
-        cout << "Press any key to continue...";
-        _getch();
+        ostringstream msg;
+        msg << "You do not hold symbol \"" << symbol << "\".\n"
+            << "Please choose a symbol from your holdings list.";
+        showErrorMessage(hConsole, msg.str());
         return;
     }
 
@@ -962,31 +1372,27 @@ void removeStock(char symbols[][SYM_LEN],
     {
         cin.clear();
         cin.ignore(10000, '\n');
-        cout << "Invalid share quantity.\n";
-        cout << "Press any key to continue...";
-        _getch();
+        showErrorMessage(hConsole, "Invalid share quantity.\nPlease enter a whole number (example: 5).\nEnter 0 to cancel.");
         return;
     }
     cin.ignore(10000, '\n');
     if (shares == 0)
     {
-        cout << "Cancelled. Press any key...";
-        _getch();
+        showInfoMessage(hConsole, "Sell cancelled.\nNo shares were sold.");
         return;
     }
     if (shares < 0)
     {
-        cout << "Invalid share quantity.\n";
-        cout << "Press any key to continue...";
-        _getch();
+        showErrorMessage(hConsole, "Invalid share quantity.\nShares cannot be negative.");
         return;
     }
 
     if (shares > holdShares[hIdx])
     {
-        cout << "Not enough shares. You only have " << holdShares[hIdx] << ".\n";
-        cout << "Press any key to continue...";
-        _getch();
+        ostringstream msg;
+        msg << "Not enough shares to sell.\n"
+            << "You only have " << holdShares[hIdx] << " share(s) of " << holdSymbols[hIdx] << ".";
+        showErrorMessage(hConsole, msg.str());
         return;
     }
 
@@ -1006,91 +1412,41 @@ void removeStock(char symbols[][SYM_LEN],
         holdCount--;
     }
 
-    cout << "Sold " << shares << " shares of " << symbols[mIdx]
-         << " for Rs. " << fixed << setprecision(2) << proceeds << endl;
+    clearScreen();
+    setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    cout << "\n\n[OK] Sold " << shares << " shares of " << symbols[mIdx] << "\n";
+    resetColor(hConsole);
+    cout << "Received: Rs. " << fixed << setprecision(2) << proceeds << endl;
     cout << "New cash balance: Rs. " << balance << endl;
-    cout << "Press any key to continue...";
+    setAccentYellow(hConsole);
+    cout << "\nPress any key to continue...";
+    resetColor(hConsole);
     _getch();
-}
-
-/* Write one money cell into a fixed-width field (optional leading +) */
-void writeAlignedMoney(ostream &out, double value, int width, bool showPlus)
-{
-    ostringstream cell;
-    cell << fixed << setprecision(2);
-    if (showPlus && value > 0.0001)
-        cell << "+";
-    cell << value;
-    out << cellRight(cell.str(), width);
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+    clearScreen();
 }
 
 void writePortfolioSeparator(ostream &out)
 {
-    printRuleLine(out, '*', PORTFOLIO_LINE_WIDTH);
+    printRuleLine(out, '=', PF_FILE_WIDTH);
 }
 
-void writePortfolioHeaderRow(ostream &out)
+void writePortfolioSoftLine(ostream &out)
 {
-    printCellLeft(out, "Symbol", COL_SYM);
-    printColGap(out);
-    printCellLeft(out, "Company Name", COL_NAME);
-    printColGap(out);
-    printCellRightText(out, "Share Qty", COL_SHARES);
-    printColGap(out);
-    printCellRightText(out, "Current Price", COL_PRICE);
-    printColGap(out);
-    printCellRightText(out, "Previous Price", COL_PRICE);
-    printColGap(out);
-    printCellRightText(out, "Gain / Loss", COL_GL);
-    printColGap(out);
-    printCellRightText(out, "Highest Price", COL_PRICE);
-    printColGap(out);
-    printCellRightText(out, "Lowest Price", COL_PRICE);
-    out << "\n";
+    printRuleLine(out, '-', PF_FILE_WIDTH);
 }
 
-void writePortfolioDataRow(ostream &out,
-                           const char *symbol,
-                           const char *companyName,
-                           int shares,
-                           double closePrice,
-                           double previousPrice,
-                           double gainLoss,
-                           double high,
-                           double low)
+void clearPortfolioMemory(char ownerName[],
+                          double &balance,
+                          int &holdCount,
+                          bool &portfolioReady,
+                          bool &onPortfolio)
 {
-    printCellLeft(out, symbol, COL_SYM);
-    printColGap(out);
-    printCellLeft(out, companyName, COL_NAME);
-    printColGap(out);
-    {
-        ostringstream sh;
-        sh << shares;
-        printCellRightText(out, sh.str(), COL_SHARES);
-    }
-    printColGap(out);
-    printMoneyCell(out, closePrice, COL_PRICE, false);
-    printColGap(out);
-    printMoneyCell(out, previousPrice, COL_PRICE, false);
-    printColGap(out);
-    writeAlignedMoney(out, gainLoss, COL_GL, true);
-    printColGap(out);
-    printMoneyCell(out, high, COL_PRICE, false);
-    printColGap(out);
-    printMoneyCell(out, low, COL_PRICE, false);
-    out << "\n";
-}
-
-void writePortfolioFooterLine(ostream &out, const char *label, double value)
-{
-    const int labW = 28;
-    const int valW = 14;
-    ostringstream v;
-    v << fixed << setprecision(2);
-    if (value > 0.0001)
-        v << "+";
-    v << value;
-    out << cellLeft(label, labW) << " : " << cellRight(v.str(), valW) << "\n";
+    ownerName[0] = '\0';
+    balance = 0.0;
+    holdCount = 0;
+    portfolioReady = false;
+    onPortfolio = false;
 }
 
 bool savePortfolio(const char *filename,
@@ -1118,41 +1474,57 @@ bool savePortfolio(const char *filename,
     double newBalance = balance + todayGL;
 
     writePortfolioSeparator(fout);
-    fout << "Portfolio owner: " << ownerName << "\n";
-    fout << "Cash available (Rs.): " << fixed << setprecision(2) << balance << "\n\n";
-    writePortfolioHeaderRow(fout);
+    fout << "  KARACHI STOCK MARKET - YOUR PORTFOLIO\n";
+    fout << "  (Easy to read block format)\n";
     writePortfolioSeparator(fout);
+    fout << "\n";
+    writeLabeled(fout, "Owner Name", ownerName);
+    writeLabeledMoney(fout, "Cash (Rs.)", balance, false);
     fout << "\n";
 
     if (holdCount == 0)
     {
-        fout << "(No holdings in this session)\n\n";
+        writePortfolioSoftLine(fout);
+        fout << "No shares bought yet.\n";
+        fout << "Open the app, press M to add money, then A to buy.\n";
+        writePortfolioSoftLine(fout);
     }
 
+    int shown = 0;
     for (int h = 0; h < holdCount; h++)
     {
         int idx = findSymbolIndex(symbols, companyCount, holdSymbols[h]);
         if (idx < 0)
             continue;
         double gl = (currPrice[idx] - prevPrice[idx]) * holdShares[h];
-        writePortfolioDataRow(fout,
-                              symbols[idx],
-                              names[idx],
-                              holdShares[h],
-                              currPrice[idx],
-                              prevPrice[idx],
-                              gl,
-                              highPrice[idx],
-                              lowPrice[idx]);
+        shown++;
+
+        writePortfolioSoftLine(fout);
+        fout << "[HOLDING " << shown << "]\n";
+        writeLabeled(fout, "Symbol", symbols[idx]);
+        writeLabeled(fout, "Company Name", names[idx]);
+        {
+            ostringstream sh;
+            sh << holdShares[h];
+            writeLabeled(fout, "Shares Owned", sh.str());
+        }
+        writeLabeledMoney(fout, "Current Price", currPrice[idx], false);
+        writeLabeledMoney(fout, "Previous Price", prevPrice[idx], false);
+        writeLabeledMoney(fout, "Gain / Loss", gl, true);
+        writeLabeledMoney(fout, "Highest Price", highPrice[idx], false);
+        writeLabeledMoney(fout, "Lowest Price", lowPrice[idx], false);
     }
 
     fout << "\n";
     writePortfolioSeparator(fout);
-    writePortfolioFooterLine(fout, "Today's Gain or Loss (Rs.)", todayGL);
-    writePortfolioFooterLine(fout, "Previous Balance (Rs.)", previousBalance);
-    writePortfolioFooterLine(fout, "New Balance (Rs.)", newBalance);
-    writePortfolioFooterLine(fout, "Cash available (Rs.)", balance);
+    fout << "  SUMMARY\n";
     writePortfolioSeparator(fout);
+    writePortfolioFooterLine(fout, "Today's Gain or Loss", todayGL, true);
+    writePortfolioFooterLine(fout, "Previous Balance", previousBalance, false);
+    writePortfolioFooterLine(fout, "New Balance", newBalance, false);
+    writePortfolioFooterLine(fout, "Cash Available", balance, false);
+    writePortfolioSeparator(fout);
+    fout << "Tip: Do not edit this file while the program is running.\n";
 
     fout.close();
     return true;
@@ -1162,6 +1534,9 @@ void prepareTextInput()
 {
     FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
     cin.clear();
+    /* Discard any partial line still sitting in the iostream buffer. */
+    if (cin.rdbuf()->in_avail() > 0)
+        cin.ignore(cin.rdbuf()->in_avail());
 }
 
 bool portfolioFileExists(const char *filename)
@@ -1190,15 +1565,17 @@ bool peekPortfolioOwner(const char *filename, char ownerOut[])
     string line;
     while (getline(in, line))
     {
-        const string key = "Portfolio owner:";
-        size_t pos = line.find(key);
-        if (pos != string::npos)
-        {
-            string name = trimString(line.substr(pos + key.size()));
-            strncpy(ownerOut, name.c_str(), OWNER_LEN - 1);
-            ownerOut[OWNER_LEN - 1] = '\0';
-            return ownerOut[0] != '\0';
-        }
+        string t = trimString(line);
+        size_t colon = t.find(':');
+        if (colon == string::npos)
+            continue;
+        string key = trimString(t.substr(0, colon));
+        if (_stricmp(key.c_str(), "Portfolio owner") != 0)
+            continue;
+        string name = trimString(t.substr(colon + 1));
+        strncpy(ownerOut, name.c_str(), OWNER_LEN - 1);
+        ownerOut[OWNER_LEN - 1] = '\0';
+        return ownerOut[0] != '\0';
     }
     return false;
 }
@@ -1221,79 +1598,172 @@ bool loadPortfolio(const char *filename,
     balance = 0.0;
     holdCount = 0;
 
+    string pendingSym;
+    int pendingShares = -1;
+    bool inSummary = false;
+
     string line;
     while (getline(in, line))
     {
         string t = trimString(line);
         if (t.empty())
             continue;
-
-        if (t.find("Portfolio owner:") == 0)
+        if (t[0] == '=' || t[0] == '-' || t[0] == '*')
+            continue;
+        if (t.find("PORTFOLIO") != string::npos || t.find("KARACHI STOCK") != string::npos)
+            continue;
+        if (t.find("[HOLDING") != string::npos || t.find("HOLDING") == 0)
+            continue;
+        if (t.find("Easy to read") != string::npos || t.find("Tip:") == 0)
+            continue;
+        if (t.find("Sym") == 0 && t.find("Company") != string::npos)
+            continue;
+        if (t.find("SUMMARY") != string::npos || t.find("SESSION SUMMARY") != string::npos)
         {
-            string name = trimString(t.substr(string("Portfolio owner:").size()));
-            strncpy(ownerName, name.c_str(), OWNER_LEN - 1);
-            ownerName[OWNER_LEN - 1] = '\0';
+            inSummary = true;
+            /* commit any pending holding before summary */
+            if (!pendingSym.empty() && pendingShares > 0)
+            {
+                int mIdx = findSymbolIndex(symbols, companyCount, pendingSym.c_str());
+                if (mIdx >= 0)
+                {
+                    if (holdCount >= holdCapacity)
+                        expandHoldings(holdSymbols, holdShares, holdCapacity);
+                    strncpy(holdSymbols[holdCount], symbols[mIdx], SYM_LEN - 1);
+                    holdSymbols[holdCount][SYM_LEN - 1] = '\0';
+                    holdShares[holdCount] = pendingShares;
+                    holdCount++;
+                }
+                pendingSym.clear();
+                pendingShares = -1;
+            }
             continue;
         }
-
-        if (t.find("Cash available (Rs.):") == 0)
-        {
-            string num = trimString(t.substr(string("Cash available (Rs.):").size()));
-            balance = atof(num.c_str());
-            continue;
-        }
-
-        /* Skip separators / headers / footers */
-        if (t[0] == '*' || t.find("Symbol") == 0 || t.find("Company Name") != string::npos)
-            continue;
-        if (t.find("Today's Gain") != string::npos || t.find("Previous Balance") != string::npos ||
-            t.find("New Balance") != string::npos || t.find("No holdings") != string::npos)
+        if (t.find("No holdings") != string::npos || t.find("No shares") != string::npos)
             continue;
 
-        /* Holding row: starts with a known market symbol */
-        string sym;
+        size_t colon = t.find(':');
+        if (colon == string::npos)
         {
-            stringstream ss(t);
-            ss >> sym;
-        }
-        if (sym.empty())
-            continue;
-        int mIdx = findSymbolIndex(symbols, companyCount, sym.c_str());
-        if (mIdx < 0)
-            continue;
-
-        int shares = 0;
-        int sharePos = COL_SYM + COL_GAP + COL_NAME + COL_GAP;
-        if ((int)line.size() >= sharePos + COL_SHARES)
-        {
-            string shareCell = trimString(line.substr((size_t)sharePos, (size_t)COL_SHARES));
-            shares = atoi(shareCell.c_str());
-        }
-        else
-        {
-            /* Fallback: 2nd token as shares */
-            stringstream ss(t);
-            string tmp;
-            ss >> tmp >> tmp; /* skip symbol; next may be company words — weaker */
-            /* try scan for first integer after symbol */
-            for (size_t i = sym.size(); i < t.size(); i++)
+            /* Legacy single-line row: SYMBOL ... shares ... */
+            string sym;
+            {
+                stringstream ss(t);
+                ss >> sym;
+            }
+            if (sym.empty())
+                continue;
+            int mIdx = findSymbolIndex(symbols, companyCount, sym.c_str());
+            if (mIdx < 0)
+                continue;
+            int shares = 0;
+            for (size_t i = 0; i < t.size(); i++)
             {
                 if (isdigit(static_cast<unsigned char>(t[i])))
                 {
+                    /* skip price-like decimals by taking first integer token after company */
                     shares = atoi(t.c_str() + i);
                     break;
                 }
             }
+            /* Better legacy parse: find share qty as standalone int before a price with dot */
+            {
+                stringstream ss(t);
+                string tok;
+                ss >> tok; /* symbol */
+                int foundShares = 0;
+                while (ss >> tok)
+                {
+                    bool allDigit = !tok.empty();
+                    for (size_t k = 0; k < tok.size(); k++)
+                    {
+                        if (!isdigit(static_cast<unsigned char>(tok[k])))
+                        {
+                            allDigit = false;
+                            break;
+                        }
+                    }
+                    if (allDigit)
+                    {
+                        foundShares = atoi(tok.c_str());
+                        break;
+                    }
+                }
+                if (foundShares > 0)
+                    shares = foundShares;
+            }
+            if (shares <= 0)
+                continue;
+            if (holdCount >= holdCapacity)
+                expandHoldings(holdSymbols, holdShares, holdCapacity);
+            strncpy(holdSymbols[holdCount], symbols[mIdx], SYM_LEN - 1);
+            holdSymbols[holdCount][SYM_LEN - 1] = '\0';
+            holdShares[holdCount] = shares;
+            holdCount++;
+            continue;
         }
-        if (shares <= 0)
+
+        string key = trimString(t.substr(0, colon));
+        string val = trimString(t.substr(colon + 1));
+
+        if (_stricmp(key.c_str(), "Portfolio owner") == 0 ||
+            _stricmp(key.c_str(), "Owner Name") == 0)
+        {
+            strncpy(ownerName, val.c_str(), OWNER_LEN - 1);
+            ownerName[OWNER_LEN - 1] = '\0';
+            continue;
+        }
+        if (_stricmp(key.c_str(), "Cash available") == 0 ||
+            _stricmp(key.c_str(), "Cash available (Rs.)") == 0 ||
+            _stricmp(key.c_str(), "Cash (Rs.)") == 0 ||
+            _stricmp(key.c_str(), "Cash Available") == 0)
+        {
+            if (!inSummary)
+                balance = atof(val.c_str());
+            continue;
+        }
+        if (inSummary)
             continue;
 
-        if (holdCount >= holdCapacity)
-            expandHoldings(holdSymbols, holdShares, holdCapacity);
-        strncpy(holdSymbols[holdCount], symbols[mIdx], SYM_LEN - 1);
-        holdSymbols[holdCount][SYM_LEN - 1] = '\0';
-        holdShares[holdCount] = shares;
-        holdCount++;
+        if (_stricmp(key.c_str(), "Symbol") == 0)
+        {
+            if (!pendingSym.empty() && pendingShares > 0)
+            {
+                int mIdx = findSymbolIndex(symbols, companyCount, pendingSym.c_str());
+                if (mIdx >= 0)
+                {
+                    if (holdCount >= holdCapacity)
+                        expandHoldings(holdSymbols, holdShares, holdCapacity);
+                    strncpy(holdSymbols[holdCount], symbols[mIdx], SYM_LEN - 1);
+                    holdSymbols[holdCount][SYM_LEN - 1] = '\0';
+                    holdShares[holdCount] = pendingShares;
+                    holdCount++;
+                }
+            }
+            pendingSym = val;
+            pendingShares = -1;
+            continue;
+        }
+        if (_stricmp(key.c_str(), "Share Qty") == 0 ||
+            _stricmp(key.c_str(), "Shares Owned") == 0)
+        {
+            pendingShares = atoi(val.c_str());
+            continue;
+        }
+    }
+
+    if (!pendingSym.empty() && pendingShares > 0)
+    {
+        int mIdx = findSymbolIndex(symbols, companyCount, pendingSym.c_str());
+        if (mIdx >= 0)
+        {
+            if (holdCount >= holdCapacity)
+                expandHoldings(holdSymbols, holdShares, holdCapacity);
+            strncpy(holdSymbols[holdCount], symbols[mIdx], SYM_LEN - 1);
+            holdSymbols[holdCount][SYM_LEN - 1] = '\0';
+            holdShares[holdCount] = pendingShares;
+            holdCount++;
+        }
     }
 
     if (ownerName[0] == '\0')
@@ -1345,205 +1815,162 @@ bool setupPortfolioSession(HANDLE hConsole,
 {
     const char *pfFile = "portfolio.txt";
 
-    /* Session already has a portfolio — still offer continue / new when opening from Market. */
-    if (portfolioReady)
+    /* File deleted / missing: never offer "existing", never restore old session quietly. */
+    if (!portfolioFileExists(pfFile))
     {
-        if (!portfolioFileExists(pfFile))
+        if (portfolioReady)
         {
-            clearScreen();
-            setAccentYellow(hConsole);
-            cout << "\nYour portfolio file is not available anymore.\n";
-            resetColor(hConsole);
-            cout << "Keeping your current session data and saving it again.\n";
-            cout << "Owner: " << ownerName << "\n";
-            if (!savePortfolio(pfFile, ownerName, balance,
-                               holdSymbols, holdShares, holdCount,
-                               symbols, names, prevPrice, currPrice,
-                               highPrice, lowPrice, companyCount))
-            {
-                setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
-                cout << "Could not save portfolio right now. Session data is still in memory.\n";
-                resetColor(hConsole);
-            }
-            else
-            {
-                setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-                cout << "Portfolio saved again successfully.\n";
-                resetColor(hConsole);
-            }
-            cout << "\nPress any key to continue...";
-            _getch();
-            return true;
+            showInfoMessage(hConsole,
+                            "Portfolio file was deleted.\n"
+                            "Old session data will not be restored.\n"
+                            "Please create a NEW portfolio.");
         }
+
+        balance = 0.0;
+        holdCount = 0;
+        ownerName[0] = '\0';
 
         clearScreen();
         setAccentCyan(hConsole);
-        printRuleLine(cout, '=', 72);
-        cout << "                         PORTFOLIO\n";
-        printRuleLine(cout, '=', 72);
+        printRuleLine(cout, '=', PORTFOLIO_LINE_WIDTH);
+        cout << " PORTFOLIO SETUP\n";
+        printRuleLine(cout, '=', PORTFOLIO_LINE_WIDTH);
         resetColor(hConsole);
-        cout << "\nCurrent session owner: " << ownerName << "\n";
-        cout << "\nPlease choose an option:\n";
-        cout << "  1) Continue with the current portfolio\n";
-        cout << "  2) Create a NEW portfolio\n";
-        cout << "  0) Cancel and return to Live Market\n\n";
-        cout << "Enter your choice (0, 1, or 2): ";
-        prepareTextInput();
-        int choice = -1;
-        cin >> choice;
-        if (cin.fail())
+        cout << "\nNo portfolio file found.\n";
+        cout << "Please set up a new portfolio to continue.\n";
+
+        askOwnerNameInteractive(hConsole, ownerName);
+        balance = 0.0;
+        holdCount = 0;
+
+        if (!savePortfolio(pfFile, ownerName, balance,
+                           holdSymbols, holdShares, holdCount,
+                           symbols, names, prevPrice, currPrice,
+                           highPrice, lowPrice, companyCount))
         {
-            cin.clear();
-            cin.ignore(10000, '\n');
+            showErrorMessage(hConsole, "Could not save the portfolio.\nPlease try again.");
             return false;
         }
-        cin.ignore(10000, '\n');
-        if (choice == 0)
-            return false;
-        if (choice == 1)
-        {
-            /* Keep memory; refresh file from current session */
-            savePortfolio(pfFile, ownerName, balance,
-                          holdSymbols, holdShares, holdCount,
-                          symbols, names, prevPrice, currPrice,
-                          highPrice, lowPrice, companyCount);
-            return true;
-        }
-        if (choice == 2)
-        {
-            askOwnerNameInteractive(hConsole, ownerName);
-            balance = 0.0;
-            holdCount = 0;
-            savePortfolio(pfFile, ownerName, balance,
-                          holdSymbols, holdShares, holdCount,
-                          symbols, names, prevPrice, currPrice,
-                          highPrice, lowPrice, companyCount);
-            return true;
-        }
-        return false;
+
+        clearScreen();
+        setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        cout << "\n\n[OK] New portfolio ready for owner \"" << ownerName << "\".\n";
+        resetColor(hConsole);
+        setAccentYellow(hConsole);
+        cout << "\nPress any key to open your portfolio...";
+        resetColor(hConsole);
+        _getch();
+        clearScreen();
+        return true;
     }
 
-    /* First open this session */
+    /* File exists — continue / new menu */
     clearScreen();
     setAccentCyan(hConsole);
-    printRuleLine(cout, '=', 72);
-    cout << "                         PORTFOLIO\n";
-    printRuleLine(cout, '=', 72);
+    printRuleLine(cout, '=', PORTFOLIO_LINE_WIDTH);
+    cout << " PORTFOLIO\n";
+    printRuleLine(cout, '=', PORTFOLIO_LINE_WIDTH);
     resetColor(hConsole);
 
-    if (portfolioFileExists(pfFile))
-    {
-        char existingOwner[OWNER_LEN] = "";
-        peekPortfolioOwner(pfFile, existingOwner);
+    char existingOwner[OWNER_LEN] = "";
+    peekPortfolioOwner(pfFile, existingOwner);
 
+    if (portfolioReady)
+        cout << "\nCurrent session owner: " << ownerName << "\n";
+    else
+    {
         cout << "\nA portfolio is already available.\n";
         if (existingOwner[0] != '\0')
             cout << "Current owner on file: " << existingOwner << "\n";
+    }
 
-        cout << "\nPlease choose an option:\n";
+    cout << "\nPlease choose an option:\n";
+    if (portfolioReady)
+        cout << "  1) Continue with the current portfolio\n";
+    else
         cout << "  1) Continue with the existing portfolio\n";
-        cout << "  2) Create a NEW portfolio\n";
-        cout << "  0) Cancel and return to Live Market\n\n";
-        cout << "Enter your choice (0, 1, or 2): ";
+    cout << "  2) Create a NEW portfolio\n";
+    cout << "  0) Cancel and return to Live Market\n\n";
+    cout << "Enter your choice (0, 1, or 2): ";
 
-        prepareTextInput();
-        int choice = -1;
-        cin >> choice;
-        if (cin.fail())
-        {
-            cin.clear();
-            cin.ignore(10000, '\n');
-            cout << "Invalid input. Returning to Live Market.\n";
-            cout << "Press any key...";
-            _getch();
-            return false;
-        }
+    prepareTextInput();
+    int choice = -1;
+    cin >> choice;
+    if (cin.fail())
+    {
+        cin.clear();
         cin.ignore(10000, '\n');
+        showErrorMessage(hConsole, "Invalid choice.\nPlease enter only 0, 1, or 2.");
+        return false;
+    }
+    cin.ignore(10000, '\n');
 
-        if (choice == 0)
-        {
-            cout << "Cancelled. Returning to Live Market.\n";
-            cout << "Press any key...";
-            _getch();
-            return false;
-        }
+    if (choice == 0)
+    {
+        showInfoMessage(hConsole, "Cancelled.\nReturning to Live Market.");
+        return false;
+    }
 
-        if (choice == 1)
+    if (choice == 1)
+    {
+        if (portfolioReady)
         {
-            if (!loadPortfolio(pfFile, ownerName, balance,
-                               holdSymbols, holdShares, holdCount, holdCapacity,
-                               symbols, companyCount))
+            if (holdCount == 0)
             {
-                setAccentYellow(hConsole);
-                cout << "\nCould not read portfolio data. Please create a new one.\n";
-                resetColor(hConsole);
-                askOwnerNameInteractive(hConsole, ownerName);
-                balance = 0.0;
-                holdCount = 0;
-                savePortfolio(pfFile, ownerName, balance,
-                              holdSymbols, holdShares, holdCount,
-                              symbols, names, prevPrice, currPrice,
-                              highPrice, lowPrice, companyCount);
+                loadPortfolio(pfFile, ownerName, balance,
+                              holdSymbols, holdShares, holdCount, holdCapacity,
+                              symbols, companyCount);
             }
+            savePortfolio(pfFile, ownerName, balance,
+                          holdSymbols, holdShares, holdCount,
+                          symbols, names, prevPrice, currPrice,
+                          highPrice, lowPrice, companyCount);
             return true;
         }
 
-        if (choice == 2)
+        if (!loadPortfolio(pfFile, ownerName, balance,
+                           holdSymbols, holdShares, holdCount, holdCapacity,
+                           symbols, companyCount))
         {
+            showErrorMessage(hConsole, "Could not read portfolio data.\nA new portfolio will be created.");
             askOwnerNameInteractive(hConsole, ownerName);
             balance = 0.0;
             holdCount = 0;
-            if (!savePortfolio(pfFile, ownerName, balance,
-                               holdSymbols, holdShares, holdCount,
-                               symbols, names, prevPrice, currPrice,
-                               highPrice, lowPrice, companyCount))
-            {
-                setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
-                cout << "\nCould not save the new portfolio.\n";
-                resetColor(hConsole);
-                cout << "Press any key...";
-                _getch();
-                return false;
-            }
-            setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-            cout << "\nNew portfolio ready for owner \"" << ownerName << "\".\n";
-            resetColor(hConsole);
-            cout << "Press any key to open your portfolio...";
-            _getch();
-            return true;
+            savePortfolio(pfFile, ownerName, balance,
+                          holdSymbols, holdShares, holdCount,
+                          symbols, names, prevPrice, currPrice,
+                          highPrice, lowPrice, companyCount);
         }
-
-        cout << "Invalid choice. Returning to Live Market.\n";
-        cout << "Press any key...";
-        _getch();
-        return false;
+        return true;
     }
 
-    /* No file yet — create with owner name only */
-    cout << "\nWelcome! Please set up your portfolio to continue.\n";
-    askOwnerNameInteractive(hConsole, ownerName);
-    balance = 0.0;
-    holdCount = 0;
-
-    if (!savePortfolio(pfFile, ownerName, balance,
-                       holdSymbols, holdShares, holdCount,
-                       symbols, names, prevPrice, currPrice,
-                       highPrice, lowPrice, companyCount))
+    if (choice == 2)
     {
-        setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
-        cout << "\nCould not save the portfolio. Please try again.\n";
+        askOwnerNameInteractive(hConsole, ownerName);
+        balance = 0.0;
+        holdCount = 0;
+        if (!savePortfolio(pfFile, ownerName, balance,
+                           holdSymbols, holdShares, holdCount,
+                           symbols, names, prevPrice, currPrice,
+                           highPrice, lowPrice, companyCount))
+        {
+            showErrorMessage(hConsole, "Could not save the new portfolio.\nPlease try again.");
+            return false;
+        }
+        clearScreen();
+        setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        cout << "\n\n[OK] New portfolio ready for owner \"" << ownerName << "\".\n";
         resetColor(hConsole);
-        cout << "Press any key to return to Live Market...";
+        setAccentYellow(hConsole);
+        cout << "\nPress any key to open your portfolio...";
+        resetColor(hConsole);
         _getch();
-        return false;
+        clearScreen();
+        return true;
     }
 
-    setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-    cout << "\nPortfolio ready for owner \"" << ownerName << "\".\n";
-    resetColor(hConsole);
-    cout << "Press any key to open your portfolio...";
-    _getch();
-    return true;
+    showErrorMessage(hConsole, "Wrong choice.\nPlease enter only 0, 1, or 2.");
+    return false;
 }
 
 /* ---------- Main ---------- */
@@ -1612,6 +2039,20 @@ int main()
 
     while (running)
     {
+        /* If portfolio.txt vanished mid-run, wipe ALL related session data. */
+        if (!portfolioFileExists("portfolio.txt") &&
+            (portfolioReady || onPortfolio || holdCount > 0 || balance > 0.0001 ||
+             (ownerName[0] != '\0' && strcmp(ownerName, "(empty)") != 0)))
+        {
+            clearPortfolioMemory(ownerName, balance, holdCount, portfolioReady, onPortfolio);
+            showErrorMessage(hConsole,
+                             "Portfolio file was deleted.\n"
+                             "All portfolio data in memory has been cleared.\n"
+                             "Buy / Sell / Money are blocked.\n"
+                             "Press P to create a NEW portfolio.");
+            continue;
+        }
+
         if (onPortfolio)
         {
             drawPortfolio(hConsole, ownerName, balance,
@@ -1650,6 +2091,19 @@ int main()
         {
             if (ch == 'P')
             {
+                /* Only flush if file still exists — never recreate a deleted file here. */
+                if (portfolioFileExists("portfolio.txt") &&
+                    (holdCount > 0 || balance > 0.0001 || portfolioReady))
+                {
+                    if (ownerName[0] == '\0' || strcmp(ownerName, "(empty)") == 0)
+                        strncpy(ownerName, "Investor", OWNER_LEN - 1);
+                    savePortfolio("portfolio.txt", ownerName, balance,
+                                  holdSymbols, holdShares, holdCount,
+                                  symbols, names, prevPrice, currPrice,
+                                  highPrice, lowPrice, companyCount);
+                    portfolioReady = true;
+                }
+
                 bool ok = setupPortfolioSession(hConsole, ownerName, balance,
                                                 holdSymbols, holdShares, holdCount, holdCapacity,
                                                 symbols, names, prevPrice, currPrice,
@@ -1663,109 +2117,142 @@ int main()
                 portfolioReady = true;
                 onPortfolio = true;
             }
-            else if (ch == 'A')
+            else if (ch == 'A' || ch == 'R' || ch == 'M')
             {
-                addStock(symbols, names, currPrice, companyCount,
-                         holdSymbols, holdShares, holdCount, holdCapacity,
-                         balance, totalSharesTraded);
-                if (portfolioReady)
-                    savePortfolio("portfolio.txt", ownerName, balance,
-                                  holdSymbols, holdShares, holdCount,
-                                  symbols, names, prevPrice, currPrice,
-                                  highPrice, lowPrice, companyCount);
-            }
-            else if (ch == 'R')
-            {
-                removeStock(symbols, names, currPrice, companyCount,
-                            holdSymbols, holdShares, holdCount,
-                            balance, totalSharesTraded);
-                if (portfolioReady)
-                    savePortfolio("portfolio.txt", ownerName, balance,
-                                  holdSymbols, holdShares, holdCount,
-                                  symbols, names, prevPrice, currPrice,
-                                  highPrice, lowPrice, companyCount);
-            }
-            else if (ch == 'M')
-            {
-                addMoney(balance);
-                if (portfolioReady)
-                    savePortfolio("portfolio.txt", ownerName, balance,
-                                  holdSymbols, holdShares, holdCount,
-                                  symbols, names, prevPrice, currPrice,
-                                  highPrice, lowPrice, companyCount);
+                if (!portfolioFileExists("portfolio.txt"))
+                {
+                    clearPortfolioMemory(ownerName, balance, holdCount, portfolioReady, onPortfolio);
+                    showErrorMessage(hConsole,
+                                     "No portfolio file found.\n"
+                                     "All portfolio data cleared.\n"
+                                     "Press P to create a NEW portfolio first.\n"
+                                     "Buy / Sell / Money are not allowed without a portfolio.");
+                    continue;
+                }
+                if (ch == 'A')
+                {
+                    addStock(symbols, names, currPrice, companyCount,
+                             holdSymbols, holdShares, holdCount, holdCapacity,
+                             balance, totalSharesTraded);
+                }
+                else if (ch == 'R')
+                {
+                    removeStock(symbols, names, currPrice, companyCount,
+                                holdSymbols, holdShares, holdCount,
+                                balance, totalSharesTraded);
+                }
+                else
+                {
+                    addMoney(balance);
+                }
+                if (ownerName[0] == '\0' || strcmp(ownerName, "(empty)") == 0)
+                    strncpy(ownerName, "Investor", OWNER_LEN - 1);
+                portfolioReady = true;
+                savePortfolio("portfolio.txt", ownerName, balance,
+                              holdSymbols, holdShares, holdCount,
+                              symbols, names, prevPrice, currPrice,
+                              highPrice, lowPrice, companyCount);
             }
             else if (ch == 'E')
             {
                 running = false;
+            }
+            else
+            {
+                ostringstream msg;
+                msg << "Wrong choice: \"" << ch << "\"\n\n"
+                    << "Valid keys on Live Market:\n"
+                    << "  Enter = refresh prices\n"
+                    << "  P     = Portfolio\n"
+                    << "  A     = Buy stock\n"
+                    << "  R     = Sell stock\n"
+                    << "  M     = Add money\n"
+                    << "  E     = Exit";
+                showErrorMessage(hConsole, msg.str());
             }
         }
         else
         {
             if (ch == 'L')
             {
-                if (portfolioReady)
+                if (portfolioFileExists("portfolio.txt"))
                     savePortfolio("portfolio.txt", ownerName, balance,
                                   holdSymbols, holdShares, holdCount,
                                   symbols, names, prevPrice, currPrice,
                                   highPrice, lowPrice, companyCount);
                 onPortfolio = false;
             }
-            else if (ch == 'A')
+            else if (ch == 'A' || ch == 'R' || ch == 'M' || ch == 'W')
             {
-                addStock(symbols, names, currPrice, companyCount,
-                         holdSymbols, holdShares, holdCount, holdCapacity,
-                         balance, totalSharesTraded);
-                if (portfolioReady)
-                    savePortfolio("portfolio.txt", ownerName, balance,
-                                  holdSymbols, holdShares, holdCount,
-                                  symbols, names, prevPrice, currPrice,
-                                  highPrice, lowPrice, companyCount);
-            }
-            else if (ch == 'R')
-            {
-                removeStock(symbols, names, currPrice, companyCount,
-                            holdSymbols, holdShares, holdCount,
-                            balance, totalSharesTraded);
-                if (portfolioReady)
-                    savePortfolio("portfolio.txt", ownerName, balance,
-                                  holdSymbols, holdShares, holdCount,
-                                  symbols, names, prevPrice, currPrice,
-                                  highPrice, lowPrice, companyCount);
-            }
-            else if (ch == 'M')
-            {
-                addMoney(balance);
-                if (portfolioReady)
-                    savePortfolio("portfolio.txt", ownerName, balance,
-                                  holdSymbols, holdShares, holdCount,
-                                  symbols, names, prevPrice, currPrice,
-                                  highPrice, lowPrice, companyCount);
-            }
-            else if (ch == 'W')
-            {
-                withdrawMoney(balance);
-                if (portfolioReady)
-                    savePortfolio("portfolio.txt", ownerName, balance,
-                                  holdSymbols, holdShares, holdCount,
-                                  symbols, names, prevPrice, currPrice,
-                                  highPrice, lowPrice, companyCount);
+                if (!portfolioFileExists("portfolio.txt"))
+                {
+                    clearPortfolioMemory(ownerName, balance, holdCount, portfolioReady, onPortfolio);
+                    showErrorMessage(hConsole,
+                                     "Portfolio file was deleted.\n"
+                                     "All portfolio data cleared.\n"
+                                     "Press P to create a NEW portfolio.\n"
+                                     "No buy / sell / money until then.");
+                    continue;
+                }
+                if (ch == 'A')
+                {
+                    addStock(symbols, names, currPrice, companyCount,
+                             holdSymbols, holdShares, holdCount, holdCapacity,
+                             balance, totalSharesTraded);
+                }
+                else if (ch == 'R')
+                {
+                    removeStock(symbols, names, currPrice, companyCount,
+                                holdSymbols, holdShares, holdCount,
+                                balance, totalSharesTraded);
+                }
+                else if (ch == 'M')
+                {
+                    addMoney(balance);
+                }
+                else
+                {
+                    withdrawMoney(balance);
+                }
+                savePortfolio("portfolio.txt", ownerName, balance,
+                              holdSymbols, holdShares, holdCount,
+                              symbols, names, prevPrice, currPrice,
+                              highPrice, lowPrice, companyCount);
             }
             else if (ch == 'E')
             {
                 running = false;
             }
+            else
+            {
+                ostringstream msg;
+                msg << "Wrong choice: \"" << ch << "\"\n\n"
+                    << "Valid keys on Portfolio:\n"
+                    << "  Enter = refresh prices\n"
+                    << "  L     = Live Market\n"
+                    << "  A     = Buy stock\n"
+                    << "  R     = Sell stock\n"
+                    << "  M     = Add money\n"
+                    << "  W     = Withdraw money\n"
+                    << "  E     = Exit";
+                showErrorMessage(hConsole, msg.str());
+            }
         }
     }
 
-    /* Always persist portfolio on exit (creates file if it was never opened). */
+    /* Always persist portfolio on exit only if file/session exists. */
     if (strcmp(ownerName, "(empty)") == 0 || ownerName[0] == '\0')
         strncpy(ownerName, "Investor", OWNER_LEN - 1);
 
     bool okCompanies = saveCompanies("companies.txt", symbols, names, currPrice, companyCount);
-    bool okPortfolio = savePortfolio("portfolio.txt", ownerName, balance,
-                                     holdSymbols, holdShares, holdCount,
-                                     symbols, names, prevPrice, currPrice,
-                                     highPrice, lowPrice, companyCount);
+    bool okPortfolio = false;
+    if (portfolioReady || portfolioFileExists("portfolio.txt") || holdCount > 0 || balance > 0.0001)
+    {
+        okPortfolio = savePortfolio("portfolio.txt", ownerName, balance,
+                                    holdSymbols, holdShares, holdCount,
+                                    symbols, names, prevPrice, currPrice,
+                                    highPrice, lowPrice, companyCount);
+    }
 
     clearScreen();
     cout << "Session closed.\n";
@@ -1774,7 +2261,9 @@ int main()
     else
         cout << "WARNING: failed to save companies.txt\n";
     if (okPortfolio)
-        cout << "Saved formatted portfolio to portfolio.txt\n";
+        cout << "Saved portfolio to portfolio.txt (block format)\n";
+    else if (!portfolioFileExists("portfolio.txt") && !portfolioReady)
+        cout << "No portfolio to save.\n";
     else
         cout << "WARNING: failed to save portfolio.txt\n";
 

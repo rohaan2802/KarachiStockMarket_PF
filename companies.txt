@@ -1,12 +1,12 @@
-PSO,Pakistan State Oil,150.70
-LUCK,Lucky Cement,488.20
-HBL,Habib Bank Limited,70.00
-OGDC,Oil and Gas Development Company,76.40
-PPL,Pakistan Petroleum Limited,112.35
-POL,Pakistan Oilfields Limited,415.50
-MARI,Mari Petroleum Company Limited,1520.00
-ENGRO,Engro Corporation Limited,305.25
-TRG,TRG Pakistan Limited,78.90
-MEBL,Meezan Bank Limited,113.00
-SYS,Systems Limited,425.60
-UBL,United Bank Limited,168.40
+PSO,Pakistan State Oil,151.70
+LUCK,Lucky Cement,488.14
+HBL,Habib Bank Limited,74.93
+OGDC,Oil and Gas Development Company,79.53
+PPL,Pakistan Petroleum Limited,111.11
+POL,Pakistan Oilfields Limited,414.11
+MARI,Mari Petroleum Company Limited,1520.38
+ENGRO,Engro Corporation Limited,304.28
+TRG,TRG Pakistan Limited,76.55
+MEBL,Meezan Bank Limited,110.39
+SYS,Systems Limited,422.73
+UBL,United Bank Limited,170.89
