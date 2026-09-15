@@ -194,26 +194,30 @@ void printGainLossFixed(HANDLE hConsole, double value, int width)
     resetColor(hConsole);
 }
 
-/* Always print direction: -> up, <- down, -- unchanged (fixed column width). */
+/* Direction with arrow head + shaft: ↑ up, ↓ down, = unchanged. */
 void printChangeArrow(HANDLE hConsole, double prev, double curr)
 {
     const char *mark;
     if (curr > prev + 0.0001)
     {
         setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-        mark = "->";
+        mark = "\xE2\x86\x91"; /* UTF-8 ↑ */
     }
     else if (curr < prev - 0.0001)
     {
         setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
-        mark = "<-";
+        mark = "\xE2\x86\x93"; /* UTF-8 ↓ */
     }
     else
     {
         setAccentYellow(hConsole);
-        mark = "--";
+        mark = "=";
     }
-    cout << right << setfill(' ') << setw(MKT_CHG) << mark;
+    /* Pad in a fixed field; arrow glyph is one display cell. */
+    int pad = MKT_CHG - 1;
+    if (pad < 0)
+        pad = 0;
+    cout << string(static_cast<size_t>(pad), ' ') << mark;
     resetColor(hConsole);
 }
 
@@ -460,7 +464,7 @@ void drawLiveMarket(HANDLE hConsole,
     setAccentYellow(hConsole);
     cout << "Show updates: Enter   | Portfolio: P | Add Stock: A | Remove: R | Add Money: M | Exit: E\n";
     cout << "Tip: Cash starts at Rs. 0 — press M to add money, then A to buy shares.\n";
-    cout << "Change: -> = up (rise)   <- = down (fall)   -- = unchanged\n";
+    cout << "Change: \xE2\x86\x91 = up (rise)   \xE2\x86\x93 = down (fall)   = = unchanged\n";
     resetColor(hConsole);
     cout << "----------------------------------------------------------------------------------------\n";
 
@@ -1093,7 +1097,7 @@ int main()
     resetColor(hConsole);
     _getch();
 
-    /* First tick so Previous/Current differ and every stock shows -> / <- on open. */
+    /* First tick so Previous/Current differ and every stock shows ↑ / ↓ on open. */
     refreshAllPrices(sessionStart, prevPrice, currPrice,
                      highPrice, lowPrice, pctChange, companyCount);
 
