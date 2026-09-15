@@ -18,6 +18,8 @@ This README starts with run steps, features, and keymap, then a **30-image scree
 
 This app uses Windows console APIs (`system("cls")`, `_getch()`, colored text). Run it in a **standard Windows console** so clear-screen, keys, and colors work correctly.
 
+On start the app **maximizes** the window, applies a **dark theme** (black background, bright text), and uses a **large Consolas bold font** (~24) like the Shopping Portal UI.
+
 ### Fastest way (recommended)
 
 From the project folder (`KarachiStockMarket_PF`):

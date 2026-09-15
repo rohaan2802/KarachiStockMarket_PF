@@ -49,12 +49,25 @@ void clearScreen()
 
 void setColor(HANDLE hConsole, WORD attributes)
 {
-    SetConsoleTextAttribute(hConsole, attributes);
+    /* Keep black background (low nibble only = FG); dark theme. */
+    SetConsoleTextAttribute(hConsole, static_cast<WORD>(attributes & 0x0F));
 }
 
 void resetColor(HANDLE hConsole)
 {
-    SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+    /* Bright white on black — high contrast default */
+    SetConsoleTextAttribute(hConsole,
+        FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+}
+
+void setAccentCyan(HANDLE hConsole)
+{
+    setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+}
+
+void setAccentYellow(HANDLE hConsole)
+{
+    setColor(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
 }
 
 void printGainLossColored(HANDLE hConsole, double value)
@@ -74,6 +87,38 @@ void printGainLossColored(HANDLE hConsole, double value)
         resetColor(hConsole);
         cout << fixed << setprecision(2) << value;
     }
+    resetColor(hConsole);
+}
+
+void setFontBold(HANDLE hConsole, int height = 24)
+{
+    CONSOLE_FONT_INFOEX fontInfo;
+    fontInfo.cbSize = sizeof(CONSOLE_FONT_INFOEX);
+    GetCurrentConsoleFontEx(hConsole, FALSE, &fontInfo);
+    fontInfo.dwFontSize.X = 0;
+    fontInfo.dwFontSize.Y = static_cast<SHORT>(height);
+    fontInfo.FontWeight = FW_BOLD;
+    wcscpy_s(fontInfo.FaceName, L"Consolas");
+    SetCurrentConsoleFontEx(hConsole, FALSE, &fontInfo);
+}
+
+void maximizeConsoleWindow()
+{
+    HWND hwnd = GetConsoleWindow();
+    if (hwnd != NULL)
+    {
+        ShowWindow(hwnd, SW_MAXIMIZE);
+        Sleep(50); /* let maximize apply before font/buffer layout */
+    }
+}
+
+void enableDarkTheme(HANDLE hConsole)
+{
+    /* Black background + bright white default (cmd color table) */
+    system("color 0F");
+    SetConsoleOutputCP(65001);
+    SetConsoleCP(65001);
+    setFontBold(hConsole, 24);
     resetColor(hConsole);
 }
 
@@ -298,16 +343,17 @@ void drawLiveMarket(HANDLE hConsole,
                     long long totalSharesTraded)
 {
     clearScreen();
-    setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+    setAccentCyan(hConsole);
     cout << "========================================================================================\n";
     cout << "                        KARACHI STOCK MARKET (LIVE)\n";
     cout << "========================================================================================\n";
-    resetColor(hConsole);
-
+    setAccentYellow(hConsole);
     cout << "Show updates: Enter   | Portfolio: P | Add Stock: A | Remove: R | Add Money: M | Exit: E\n";
     cout << "Tip: Cash starts at Rs. 0 — press M to add money, then A to buy shares.\n";
+    resetColor(hConsole);
     cout << "----------------------------------------------------------------------------------------\n";
 
+    setAccentCyan(hConsole);
     cout << left
          << setw(8) << "Stocks"
          << setw(36) << "Company Name"
@@ -317,6 +363,7 @@ void drawLiveMarket(HANDLE hConsole,
          << setw(4) << " "
          << setw(10) << "High"
          << setw(10) << "Low" << endl;
+    resetColor(hConsole);
     cout << "----------------------------------------------------------------------------------------\n";
 
     for (int i = 0; i < companyCount; i++)
@@ -353,13 +400,19 @@ void drawLiveMarket(HANDLE hConsole,
     findTopAdvancerDecliner(pctChange, companyCount, adv, dec);
 
     cout << "----------------------------------------------------------------------------------------\n";
+    setAccentYellow(hConsole);
     cout << "Total shares traded today : " << totalSharesTraded << endl;
+    setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
     cout << "Top % advancer symbol     : " << symbols[adv]
          << "  (" << fixed << setprecision(2) << pctChange[adv] << "%)" << endl;
+    setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
     cout << "Top % decliner symbol     : " << symbols[dec]
          << "  (" << fixed << setprecision(2) << pctChange[dec] << "%)" << endl;
+    resetColor(hConsole);
     cout << "Note: Price moves are hard-capped at +/-15% of session-start price.\n";
+    setAccentCyan(hConsole);
     cout << "========================================================================================\n";
+    resetColor(hConsole);
 }
 
 void computePortfolioTotals(char **holdSymbols,
@@ -397,15 +450,16 @@ void drawPortfolio(HANDLE hConsole,
                    int companyCount)
 {
     clearScreen();
-    setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+    setAccentCyan(hConsole);
     cout << "========================================================================================\n";
     cout << "                     PORTFOLIO OWNER: " << ownerName << " (LIVE)\n";
     cout << "========================================================================================\n";
-    resetColor(hConsole);
-
+    setAccentYellow(hConsole);
     cout << "Updates: Enter | Live Market: L | Add: A | Remove: R | Money: M | Withdraw: W\n";
+    resetColor(hConsole);
     cout << "----------------------------------------------------------------------------------------\n";
 
+    setAccentCyan(hConsole);
     cout << left << setw(COL_SYM) << "Stocks"
          << left << setw(COL_NAME) << "Company Name"
          << right << setw(COL_SHARES) << "Shares"
@@ -414,6 +468,7 @@ void drawPortfolio(HANDLE hConsole,
          << right << setw(COL_GL) << "Gain/Loss"
          << right << setw(COL_PRICE) << "High"
          << right << setw(COL_PRICE) << "Low" << endl;
+    resetColor(hConsole);
     cout << "----------------------------------------------------------------------------------------\n";
 
     double todayGL = 0.0;
@@ -454,10 +509,15 @@ void drawPortfolio(HANDLE hConsole,
     cout << "Today's Gain or Loss (Rs.) : ";
     printGainLossColored(hConsole, todayGL);
     cout << endl;
+    resetColor(hConsole);
     cout << "Previous Balance (Rs.)     : " << fixed << setprecision(2) << previousBalance << endl;
+    setAccentYellow(hConsole);
     cout << "New Balance (Rs.)          : " << fixed << setprecision(2) << newBalance << endl;
+    resetColor(hConsole);
     cout << "Cash available             : " << fixed << setprecision(2) << balance << endl;
+    setAccentCyan(hConsole);
     cout << "========================================================================================\n";
+    resetColor(hConsole);
 }
 
 /* ---------- Transactions ---------- */
@@ -826,8 +886,9 @@ void ensureOwnerName(char ownerName[])
 
 int main()
 {
-    enableUtf8Console();
     HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    maximizeConsoleWindow();
+    enableDarkTheme(hConsole);
     srand((unsigned int)time(0));
 
     char symbols[MAX_COMPANIES][SYM_LEN];
@@ -846,15 +907,25 @@ int main()
 
     if (companyCount <= 0)
     {
+        setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
         cout << "No companies loaded. Place companies.txt next to the executable.\n";
+        resetColor(hConsole);
         cout << "Press any key to exit...";
         _getch();
         return 1;
     }
 
+    clearScreen();
+    setAccentCyan(hConsole);
+    cout << "========================================================================================\n";
+    cout << "                   KARACHI STOCK MARKET TRADING SIMULATOR\n";
+    cout << "========================================================================================\n";
+    resetColor(hConsole);
     cout << "Loaded " << companyCount << " companies from companies.txt\n";
     cout << "Session-start prices locked for +/-15% cap.\n";
-    cout << "Press any key to open Live Market...";
+    setAccentYellow(hConsole);
+    cout << "\nPress any key to open Live Market...";
+    resetColor(hConsole);
     _getch();
 
     char ownerName[OWNER_LEN] = "(empty)";
