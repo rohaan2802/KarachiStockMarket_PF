@@ -22,6 +22,7 @@
 #include <ctime>
 #include <cstdlib>
 #include <cmath>
+#include <cctype>
 #include <conio.h>
 #include <windows.h>
 
@@ -480,8 +481,8 @@ void drawLiveMarket(HANDLE hConsole,
     printRuleLine(cout, '=', MKT_LINE_WIDTH);
     setAccentYellow(hConsole);
     cout << "Show updates: Enter   | Portfolio: P | Add Stock: A | Remove: R | Add Money: M | Exit: E\n";
-    cout << "Tip: Cash starts at Rs. 0 — press M to add money, then A to buy shares.\n";
-    cout << "Change: \xE2\x86\x91 = up (rise)   \xE2\x86\x93 = down (fall)   = = unchanged\n";
+    cout << "Tip: Press P to open Portfolio (create new or continue existing). Cash starts at Rs. 0.\n";
+    cout << "Change: \"\xE2\x86\x91\" = up (rise)   \"\xE2\x86\x93\" = down (fall)   \"=\" = unchanged\n";
     resetColor(hConsole);
     cout << "\n";
     printRuleLine(cout, '-', MKT_LINE_WIDTH);
@@ -582,6 +583,7 @@ void drawPortfolio(HANDLE hConsole,
     cout << "                     PORTFOLIO OWNER: " << ownerName << " (LIVE)\n";
     printRuleLine(cout, '=', PORTFOLIO_LINE_WIDTH);
     setAccentYellow(hConsole);
+    cout << "Owner name on this portfolio: " << ownerName << "\n";
     cout << "Updates: Enter | Live Market: L | Add: A | Remove: R | Money: M | Withdraw: W\n";
     resetColor(hConsole);
     cout << "\n";
@@ -671,7 +673,10 @@ void drawPortfolio(HANDLE hConsole,
 
 void addMoney(double &balance)
 {
-    cout << "\nEnter amount to add (Rs.)  [0 = Cancel]: ";
+    cout << "\n----- ADD MONEY -----\n";
+    cout << "Enter the amount to add in Rs.\n";
+    cout << "Enter 0 to cancel and go back.\n";
+    cout << "Amount: ";
     double amount;
     cin >> amount;
     if (cin.fail())
@@ -704,7 +709,10 @@ void addMoney(double &balance)
 
 void withdrawMoney(double &balance)
 {
-    cout << "\nEnter amount to withdraw (Rs.)  [0 = Cancel]: ";
+    cout << "\n----- WITHDRAW MONEY -----\n";
+    cout << "Enter the amount to withdraw in Rs.\n";
+    cout << "Enter 0 to cancel and go back.\n";
+    cout << "Amount: ";
     double amount;
     cin >> amount;
     if (cin.fail())
@@ -757,14 +765,17 @@ void addStock(char symbols[][SYM_LEN],
     char symbol[SYM_LEN];
     int shares;
 
-    cout << "\nAvailable symbols: ";
+    cout << "\n----- BUY STOCK -----\n";
+    cout << "Available symbols: ";
     for (int i = 0; i < companyCount; i++)
     {
         cout << symbols[i];
         if (i + 1 < companyCount)
             cout << ", ";
     }
-    cout << "\nEnter stock symbol to BUY  [0 = Cancel]: ";
+    cout << "\nEnter the stock symbol you want to BUY.\n";
+    cout << "Enter 0 to cancel and go back.\n";
+    cout << "Symbol: ";
     cin >> symbol;
     cin.ignore(10000, '\n');
 
@@ -787,7 +798,9 @@ void addStock(char symbols[][SYM_LEN],
 
     cout << "Current price of " << symbols[mIdx] << " (" << names[mIdx]
          << "): Rs. " << fixed << setprecision(2) << currPrice[mIdx] << endl;
-    cout << "Enter number of shares to buy  [0 = Cancel]: ";
+    cout << "Enter how many shares to buy.\n";
+    cout << "Enter 0 to cancel and go back.\n";
+    cout << "Shares: ";
     cin >> shares;
     if (cin.fail())
     {
@@ -874,14 +887,17 @@ void removeStock(char symbols[][SYM_LEN],
     char symbol[SYM_LEN];
     int shares;
 
-    cout << "\nYour holdings: ";
+    cout << "\n----- SELL STOCK -----\n";
+    cout << "Your holdings: ";
     for (int i = 0; i < holdCount; i++)
     {
         cout << holdSymbols[i] << "(" << holdShares[i] << ")";
         if (i + 1 < holdCount)
             cout << ", ";
     }
-    cout << "\nEnter stock symbol to SELL  [0 = Cancel]: ";
+    cout << "\nEnter the stock symbol you want to SELL.\n";
+    cout << "Enter 0 to cancel and go back.\n";
+    cout << "Symbol: ";
     cin >> symbol;
     cin.ignore(10000, '\n');
 
@@ -903,7 +919,10 @@ void removeStock(char symbols[][SYM_LEN],
 
     int mIdx = findSymbolIndex(symbols, companyCount, holdSymbols[hIdx]);
     cout << "Current price: Rs. " << fixed << setprecision(2) << currPrice[mIdx] << endl;
-    cout << "You own " << holdShares[hIdx] << " shares. Enter shares to sell  [0 = Cancel]: ";
+    cout << "You own " << holdShares[hIdx] << " shares.\n";
+    cout << "Enter how many shares to sell.\n";
+    cout << "Enter 0 to cancel and go back.\n";
+    cout << "Shares: ";
     cin >> shares;
     if (cin.fail())
     {
@@ -1063,7 +1082,8 @@ bool savePortfolio(const char *filename,
     double newBalance = balance + todayGL;
 
     writePortfolioSeparator(fout);
-    fout << "Portfolio owner: " << ownerName << "\n\n";
+    fout << "Portfolio owner: " << ownerName << "\n";
+    fout << "Cash available (Rs.): " << fixed << setprecision(2) << balance << "\n\n";
     writePortfolioHeaderRow(fout);
     writePortfolioSeparator(fout);
     fout << "\n";
@@ -1102,15 +1122,344 @@ bool savePortfolio(const char *filename,
     return true;
 }
 
+void prepareTextInput()
+{
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+    cin.clear();
+}
+
+bool portfolioFileExists(const char *filename)
+{
+    ifstream f(filename);
+    return f.good();
+}
+
+string trimString(const string &s)
+{
+    size_t a = 0;
+    while (a < s.size() && isspace(static_cast<unsigned char>(s[a])))
+        a++;
+    size_t b = s.size();
+    while (b > a && isspace(static_cast<unsigned char>(s[b - 1])))
+        b--;
+    return s.substr(a, b - a);
+}
+
+bool peekPortfolioOwner(const char *filename, char ownerOut[])
+{
+    ownerOut[0] = '\0';
+    ifstream in(filename);
+    if (!in.is_open())
+        return false;
+    string line;
+    while (getline(in, line))
+    {
+        const string key = "Portfolio owner:";
+        size_t pos = line.find(key);
+        if (pos != string::npos)
+        {
+            string name = trimString(line.substr(pos + key.size()));
+            strncpy(ownerOut, name.c_str(), OWNER_LEN - 1);
+            ownerOut[OWNER_LEN - 1] = '\0';
+            return ownerOut[0] != '\0';
+        }
+    }
+    return false;
+}
+
+bool loadPortfolio(const char *filename,
+                   char ownerName[],
+                   double &balance,
+                   char **&holdSymbols,
+                   int *&holdShares,
+                   int &holdCount,
+                   int &holdCapacity,
+                   char symbols[][SYM_LEN],
+                   int companyCount)
+{
+    ifstream in(filename);
+    if (!in.is_open())
+        return false;
+
+    ownerName[0] = '\0';
+    balance = 0.0;
+    holdCount = 0;
+
+    string line;
+    while (getline(in, line))
+    {
+        string t = trimString(line);
+        if (t.empty())
+            continue;
+
+        if (t.find("Portfolio owner:") == 0)
+        {
+            string name = trimString(t.substr(string("Portfolio owner:").size()));
+            strncpy(ownerName, name.c_str(), OWNER_LEN - 1);
+            ownerName[OWNER_LEN - 1] = '\0';
+            continue;
+        }
+
+        if (t.find("Cash available (Rs.):") == 0)
+        {
+            string num = trimString(t.substr(string("Cash available (Rs.):").size()));
+            balance = atof(num.c_str());
+            continue;
+        }
+
+        /* Skip separators / headers / footers */
+        if (t[0] == '*' || t.find("Symbol") == 0 || t.find("Company Name") != string::npos)
+            continue;
+        if (t.find("Today's Gain") != string::npos || t.find("Previous Balance") != string::npos ||
+            t.find("New Balance") != string::npos || t.find("No holdings") != string::npos)
+            continue;
+
+        /* Holding row: starts with a known market symbol */
+        string sym;
+        {
+            stringstream ss(t);
+            ss >> sym;
+        }
+        if (sym.empty())
+            continue;
+        int mIdx = findSymbolIndex(symbols, companyCount, sym.c_str());
+        if (mIdx < 0)
+            continue;
+
+        int shares = 0;
+        int sharePos = COL_SYM + COL_GAP + COL_NAME + COL_GAP;
+        if ((int)line.size() >= sharePos + COL_SHARES)
+        {
+            string shareCell = trimString(line.substr((size_t)sharePos, (size_t)COL_SHARES));
+            shares = atoi(shareCell.c_str());
+        }
+        else
+        {
+            /* Fallback: 2nd token as shares */
+            stringstream ss(t);
+            string tmp;
+            ss >> tmp >> tmp; /* skip symbol; next may be company words — weaker */
+            /* try scan for first integer after symbol */
+            for (size_t i = sym.size(); i < t.size(); i++)
+            {
+                if (isdigit(static_cast<unsigned char>(t[i])))
+                {
+                    shares = atoi(t.c_str() + i);
+                    break;
+                }
+            }
+        }
+        if (shares <= 0)
+            continue;
+
+        if (holdCount >= holdCapacity)
+            expandHoldings(holdSymbols, holdShares, holdCapacity);
+        strncpy(holdSymbols[holdCount], symbols[mIdx], SYM_LEN - 1);
+        holdSymbols[holdCount][SYM_LEN - 1] = '\0';
+        holdShares[holdCount] = shares;
+        holdCount++;
+    }
+
+    if (ownerName[0] == '\0')
+        strncpy(ownerName, "Investor", OWNER_LEN - 1);
+    return true;
+}
+
+void askOwnerNameInteractive(HANDLE hConsole, char ownerName[])
+{
+    prepareTextInput();
+    setAccentYellow(hConsole);
+    cout << "\nPlease enter the portfolio owner name.\n";
+    resetColor(hConsole);
+    cout << "Type the full name, then press Enter.\n";
+    cout << "(Enter 0 to use default name \"Investor\")\n\n";
+    cout << "Owner name: ";
+    cin.getline(ownerName, OWNER_LEN);
+    string n = trimString(ownerName);
+    if (n.empty() || isCancelToken(n.c_str()))
+        strncpy(ownerName, "Investor", OWNER_LEN - 1);
+    else
+    {
+        strncpy(ownerName, n.c_str(), OWNER_LEN - 1);
+        ownerName[OWNER_LEN - 1] = '\0';
+    }
+}
+
+/** First visit to Portfolio (P): create file if missing, or offer continue vs new. */
+bool setupPortfolioSession(HANDLE hConsole,
+                           char ownerName[],
+                           double &balance,
+                           char **&holdSymbols,
+                           int *&holdShares,
+                           int &holdCount,
+                           int &holdCapacity,
+                           char symbols[][SYM_LEN],
+                           char names[][NAME_LEN],
+                           double prevPrice[],
+                           double currPrice[],
+                           double highPrice[],
+                           double lowPrice[],
+                           int companyCount)
+{
+    clearScreen();
+    setAccentCyan(hConsole);
+    printRuleLine(cout, '=', 72);
+    cout << "                         PORTFOLIO SETUP\n";
+    printRuleLine(cout, '=', 72);
+    resetColor(hConsole);
+
+    const char *pfFile = "portfolio.txt";
+
+    if (!portfolioFileExists(pfFile))
+    {
+        setAccentYellow(hConsole);
+        cout << "\nNo portfolio file was found (portfolio.txt missing or deleted).\n";
+        resetColor(hConsole);
+        cout << "A new portfolio will be created for this session.\n";
+
+        askOwnerNameInteractive(hConsole, ownerName);
+        balance = 0.0;
+        holdCount = 0;
+
+        if (!savePortfolio(pfFile, ownerName, balance,
+                           holdSymbols, holdShares, holdCount,
+                           symbols, names, prevPrice, currPrice,
+                           highPrice, lowPrice, companyCount))
+        {
+            setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+            cout << "\nERROR: Could not create portfolio.txt\n";
+            resetColor(hConsole);
+            cout << "Press any key to return to Live Market...";
+            _getch();
+            return false;
+        }
+
+        setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        cout << "\nNew portfolio created for owner \"" << ownerName << "\".\n";
+        cout << "File saved: portfolio.txt\n";
+        resetColor(hConsole);
+        cout << "Press any key to open your portfolio...";
+        _getch();
+        return true;
+    }
+
+    char existingOwner[OWNER_LEN] = "";
+    peekPortfolioOwner(pfFile, existingOwner);
+
+    setAccentYellow(hConsole);
+    cout << "\nAn existing portfolio file was found (portfolio.txt).\n";
+    resetColor(hConsole);
+    if (existingOwner[0] != '\0')
+        cout << "Owner on file: " << existingOwner << "\n";
+    else
+        cout << "Owner on file: (could not read name)\n";
+
+    cout << "\nPlease choose an option:\n";
+    cout << "  1) Continue with the existing portfolio\n";
+    cout << "  2) Create a NEW portfolio (replaces the current file)\n";
+    cout << "  0) Cancel and go back to Live Market\n\n";
+    cout << "Enter your choice (0, 1, or 2): ";
+
+    prepareTextInput();
+    int choice = -1;
+    cin >> choice;
+    if (cin.fail())
+    {
+        cin.clear();
+        cin.ignore(10000, '\n');
+        cout << "Invalid choice. Returning to Live Market.\n";
+        cout << "Press any key...";
+        _getch();
+        return false;
+    }
+    cin.ignore(10000, '\n');
+
+    if (choice == 0)
+    {
+        cout << "Cancelled. Returning to Live Market.\n";
+        cout << "Press any key...";
+        _getch();
+        return false;
+    }
+
+    if (choice == 1)
+    {
+        if (!loadPortfolio(pfFile, ownerName, balance,
+                           holdSymbols, holdShares, holdCount, holdCapacity,
+                           symbols, companyCount))
+        {
+            setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+            cout << "\nCould not load portfolio.txt — starting a fresh portfolio instead.\n";
+            resetColor(hConsole);
+            askOwnerNameInteractive(hConsole, ownerName);
+            balance = 0.0;
+            holdCount = 0;
+            savePortfolio(pfFile, ownerName, balance,
+                          holdSymbols, holdShares, holdCount,
+                          symbols, names, prevPrice, currPrice,
+                          highPrice, lowPrice, companyCount);
+        }
+        else
+        {
+            setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+            cout << "\nLoaded portfolio for owner \"" << ownerName << "\".\n";
+            cout << "Cash available: Rs. " << fixed << setprecision(2) << balance << "\n";
+            cout << "Holdings loaded: " << holdCount << "\n";
+            resetColor(hConsole);
+        }
+        cout << "Press any key to open your portfolio...";
+        _getch();
+        return true;
+    }
+
+    if (choice == 2)
+    {
+        cout << "\nCreating a NEW portfolio (old file will be replaced).\n";
+        askOwnerNameInteractive(hConsole, ownerName);
+        balance = 0.0;
+        holdCount = 0;
+        if (!savePortfolio(pfFile, ownerName, balance,
+                           holdSymbols, holdShares, holdCount,
+                           symbols, names, prevPrice, currPrice,
+                           highPrice, lowPrice, companyCount))
+        {
+            setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+            cout << "\nERROR: Could not create portfolio.txt\n";
+            resetColor(hConsole);
+            cout << "Press any key...";
+            _getch();
+            return false;
+        }
+        setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        cout << "\nNew portfolio created for owner \"" << ownerName << "\".\n";
+        resetColor(hConsole);
+        cout << "Press any key to open your portfolio...";
+        _getch();
+        return true;
+    }
+
+    cout << "Invalid choice. Returning to Live Market.\n";
+    cout << "Press any key...";
+    _getch();
+    return false;
+}
+
 void ensureOwnerName(char ownerName[])
 {
+    /* Kept for safety; main setup uses askOwnerNameInteractive. */
     if (ownerName[0] == '\0' || strcmp(ownerName, "(empty)") == 0)
     {
-        cout << "\nEnter portfolio owner name  [0 = use Investor / Cancel default]: ";
+        prepareTextInput();
+        cout << "\nEnter portfolio owner name [0 = Investor]: ";
         cin.getline(ownerName, OWNER_LEN);
-        if (ownerName[0] == '\0' || isCancelToken(ownerName))
+        string n = trimString(ownerName);
+        if (n.empty() || isCancelToken(n.c_str()))
             strncpy(ownerName, "Investor", OWNER_LEN - 1);
-        ownerName[OWNER_LEN - 1] = '\0';
+        else
+        {
+            strncpy(ownerName, n.c_str(), OWNER_LEN - 1);
+            ownerName[OWNER_LEN - 1] = '\0';
+        }
     }
 }
 
@@ -1176,17 +1525,12 @@ int main()
 
     bool running = true;
     bool onPortfolio = false;
-    bool nameAsked = false;
+    bool portfolioReady = false;
 
     while (running)
     {
         if (onPortfolio)
         {
-            if (!nameAsked)
-            {
-                ensureOwnerName(ownerName);
-                nameAsked = true;
-            }
             drawPortfolio(hConsole, ownerName, balance,
                           holdSymbols, holdShares, holdCount,
                           symbols, names, prevPrice, currPrice,
@@ -1223,6 +1567,19 @@ int main()
         {
             if (ch == 'P')
             {
+                if (!portfolioReady)
+                {
+                    bool ok = setupPortfolioSession(hConsole, ownerName, balance,
+                                                    holdSymbols, holdShares, holdCount, holdCapacity,
+                                                    symbols, names, prevPrice, currPrice,
+                                                    highPrice, lowPrice, companyCount);
+                    if (!ok)
+                    {
+                        onPortfolio = false;
+                        continue;
+                    }
+                    portfolioReady = true;
+                }
                 onPortfolio = true;
             }
             else if (ch == 'A')
@@ -1278,6 +1635,10 @@ int main()
             }
         }
     }
+
+    /* Always persist portfolio on exit (creates file if it was never opened). */
+    if (strcmp(ownerName, "(empty)") == 0 || ownerName[0] == '\0')
+        strncpy(ownerName, "Investor", OWNER_LEN - 1);
 
     bool okCompanies = saveCompanies("companies.txt", symbols, names, currPrice, companyCount);
     bool okPortfolio = savePortfolio("portfolio.txt", ownerName, balance,
