@@ -152,17 +152,34 @@ string fitWidth(const char *s, int width)
     return t;
 }
 
-void printCellLeft(ostream &out, const char *s, int width)
+/** Exact left field (pad right with spaces) — avoids iostream sticky-flag misalignment. */
+string cellLeft(const char *s, int width)
 {
-    out << left << setfill(' ') << setw(width) << fitWidth(s, width);
+    string t = fitWidth(s, width);
+    if ((int)t.size() < width)
+        t.append(static_cast<size_t>(width - (int)t.size()), ' ');
+    return t;
 }
 
-void printCellRightText(ostream &out, const string &text, int width)
+/** Exact right field (pad left with spaces). */
+string cellRight(const string &text, int width)
 {
     string t = text;
     if ((int)t.size() > width)
         t = t.substr(0, (size_t)width);
-    out << right << setfill(' ') << setw(width) << t;
+    if ((int)t.size() < width)
+        t.insert(0, static_cast<size_t>(width - (int)t.size()), ' ');
+    return t;
+}
+
+void printCellLeft(ostream &out, const char *s, int width)
+{
+    out << cellLeft(s, width);
+}
+
+void printCellRightText(ostream &out, const string &text, int width)
+{
+    out << cellRight(text, width);
 }
 
 /** Open spacing between columns (not congested). */
@@ -185,7 +202,7 @@ void printMoneyCell(ostream &out, double value, int width, bool showPlus)
     if (showPlus && value > 0.0001)
         cell << "+";
     cell << value;
-    printCellRightText(out, cell.str(), width);
+    out << cellRight(cell.str(), width);
 }
 
 void printGainLossFixed(HANDLE hConsole, double value, int width)
@@ -196,11 +213,7 @@ void printGainLossFixed(HANDLE hConsole, double value, int width)
         cell << "+" << value;
     else
         cell << value;
-    string t = cell.str();
-    if ((int)t.size() > width)
-        t = t.substr(0, (size_t)width);
-    while ((int)t.size() < width)
-        t = " " + t;
+    string t = cellRight(cell.str(), width);
 
     if (value > 0.0001)
         setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
@@ -987,7 +1000,7 @@ void writeAlignedMoney(ostream &out, double value, int width, bool showPlus)
     if (showPlus && value > 0.0001)
         cell << "+";
     cell << value;
-    printCellRightText(out, cell.str(), width);
+    out << cellRight(cell.str(), width);
 }
 
 void writePortfolioSeparator(ostream &out)
@@ -1051,10 +1064,9 @@ void writePortfolioFooterLine(ostream &out, const char *label, double value)
 {
     const int labelWidth = 32;
     const int valueWidth = 18;
-    out << left << setfill(' ') << setw(labelWidth) << label
-        << "  *  ";
+    out << cellLeft(label, labelWidth) << "  *  ";
     writeAlignedMoney(out, value, valueWidth, true);
-    out << "  *" << "\n";
+    out << "  *\n";
 }
 
 bool savePortfolio(const char *filename,
@@ -1268,12 +1280,13 @@ bool loadPortfolio(const char *filename,
 void askOwnerNameInteractive(HANDLE hConsole, char ownerName[])
 {
     prepareTextInput();
-    setAccentYellow(hConsole);
-    cout << "\nPlease enter the portfolio owner name.\n";
+    setAccentCyan(hConsole);
+    cout << "\n----- PORTFOLIO OWNER -----\n";
     resetColor(hConsole);
-    cout << "Type the full name, then press Enter.\n";
-    cout << "(Enter 0 to use default name \"Investor\")\n\n";
-    cout << "Owner name: ";
+    cout << "Please type the owner name for this portfolio.\n";
+    cout << "Then press Enter to confirm.\n";
+    cout << "Enter 0 to use the default name \"Investor\".\n\n";
+    cout << "Enter owner name: ";
     cin.getline(ownerName, OWNER_LEN);
     string n = trimString(ownerName);
     if (n.empty() || isCancelToken(n.c_str()))
@@ -1285,7 +1298,11 @@ void askOwnerNameInteractive(HANDLE hConsole, char ownerName[])
     }
 }
 
-/** First visit to Portfolio (P): create file if missing, or offer continue vs new. */
+/**
+ * First P in session: load existing file quietly, or ask name and create.
+ * Later P: open current session portfolio only (no continue/new menu).
+ * If file disappears mid-run: keep session data and rewrite the file.
+ */
 bool setupPortfolioSession(HANDLE hConsole,
                            char ownerName[],
                            double &balance,
@@ -1299,168 +1316,100 @@ bool setupPortfolioSession(HANDLE hConsole,
                            double currPrice[],
                            double highPrice[],
                            double lowPrice[],
-                           int companyCount)
+                           int companyCount,
+                           bool portfolioReady)
 {
+    const char *pfFile = "portfolio.txt";
+
+    /* Already set up this session — just open; recreate file if it vanished. */
+    if (portfolioReady)
+    {
+        if (!portfolioFileExists(pfFile))
+        {
+            clearScreen();
+            setAccentYellow(hConsole);
+            cout << "\nYour portfolio file is not available anymore.\n";
+            resetColor(hConsole);
+            cout << "Keeping your current session data and saving it again.\n";
+            cout << "Owner: " << ownerName << "\n";
+            if (!savePortfolio(pfFile, ownerName, balance,
+                               holdSymbols, holdShares, holdCount,
+                               symbols, names, prevPrice, currPrice,
+                               highPrice, lowPrice, companyCount))
+            {
+                setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+                cout << "Could not save portfolio right now. Session data is still in memory.\n";
+                resetColor(hConsole);
+            }
+            else
+            {
+                setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+                cout << "Portfolio saved again successfully.\n";
+                resetColor(hConsole);
+            }
+            cout << "\nPress any key to continue...";
+            _getch();
+        }
+        return true;
+    }
+
+    /* First open this session */
     clearScreen();
     setAccentCyan(hConsole);
     printRuleLine(cout, '=', 72);
-    cout << "                         PORTFOLIO SETUP\n";
+    cout << "                         PORTFOLIO\n";
     printRuleLine(cout, '=', 72);
     resetColor(hConsole);
 
-    const char *pfFile = "portfolio.txt";
-
-    if (!portfolioFileExists(pfFile))
+    if (portfolioFileExists(pfFile))
     {
+        if (loadPortfolio(pfFile, ownerName, balance,
+                          holdSymbols, holdShares, holdCount, holdCapacity,
+                          symbols, companyCount))
+        {
+            /* Quiet load — open directly, no continue/new menu */
+            return true;
+        }
+        /* Unreadable file — start fresh with name prompt only */
         setAccentYellow(hConsole);
-        cout << "\nNo portfolio file was found (portfolio.txt missing or deleted).\n";
+        cout << "\nCould not read the existing portfolio data.\n";
         resetColor(hConsole);
-        cout << "A new portfolio will be created for this session.\n";
-
+        cout << "Please set up the portfolio owner to continue.\n";
         askOwnerNameInteractive(hConsole, ownerName);
         balance = 0.0;
         holdCount = 0;
-
-        if (!savePortfolio(pfFile, ownerName, balance,
-                           holdSymbols, holdShares, holdCount,
-                           symbols, names, prevPrice, currPrice,
-                           highPrice, lowPrice, companyCount))
-        {
-            setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
-            cout << "\nERROR: Could not create portfolio.txt\n";
-            resetColor(hConsole);
-            cout << "Press any key to return to Live Market...";
-            _getch();
-            return false;
-        }
-
-        setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-        cout << "\nNew portfolio created for owner \"" << ownerName << "\".\n";
-        cout << "File saved: portfolio.txt\n";
-        resetColor(hConsole);
-        cout << "Press any key to open your portfolio...";
-        _getch();
+        savePortfolio(pfFile, ownerName, balance,
+                      holdSymbols, holdShares, holdCount,
+                      symbols, names, prevPrice, currPrice,
+                      highPrice, lowPrice, companyCount);
         return true;
     }
 
-    char existingOwner[OWNER_LEN] = "";
-    peekPortfolioOwner(pfFile, existingOwner);
+    /* No file yet — create with owner name (no "missing/deleted" wording) */
+    cout << "\nWelcome! Please set up your portfolio to continue.\n";
+    askOwnerNameInteractive(hConsole, ownerName);
+    balance = 0.0;
+    holdCount = 0;
 
-    setAccentYellow(hConsole);
-    cout << "\nAn existing portfolio file was found (portfolio.txt).\n";
+    if (!savePortfolio(pfFile, ownerName, balance,
+                       holdSymbols, holdShares, holdCount,
+                       symbols, names, prevPrice, currPrice,
+                       highPrice, lowPrice, companyCount))
+    {
+        setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+        cout << "\nCould not save the portfolio. Please try again.\n";
+        resetColor(hConsole);
+        cout << "Press any key to return to Live Market...";
+        _getch();
+        return false;
+    }
+
+    setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    cout << "\nPortfolio ready for owner \"" << ownerName << "\".\n";
     resetColor(hConsole);
-    if (existingOwner[0] != '\0')
-        cout << "Owner on file: " << existingOwner << "\n";
-    else
-        cout << "Owner on file: (could not read name)\n";
-
-    cout << "\nPlease choose an option:\n";
-    cout << "  1) Continue with the existing portfolio\n";
-    cout << "  2) Create a NEW portfolio (replaces the current file)\n";
-    cout << "  0) Cancel and go back to Live Market\n\n";
-    cout << "Enter your choice (0, 1, or 2): ";
-
-    prepareTextInput();
-    int choice = -1;
-    cin >> choice;
-    if (cin.fail())
-    {
-        cin.clear();
-        cin.ignore(10000, '\n');
-        cout << "Invalid choice. Returning to Live Market.\n";
-        cout << "Press any key...";
-        _getch();
-        return false;
-    }
-    cin.ignore(10000, '\n');
-
-    if (choice == 0)
-    {
-        cout << "Cancelled. Returning to Live Market.\n";
-        cout << "Press any key...";
-        _getch();
-        return false;
-    }
-
-    if (choice == 1)
-    {
-        if (!loadPortfolio(pfFile, ownerName, balance,
-                           holdSymbols, holdShares, holdCount, holdCapacity,
-                           symbols, companyCount))
-        {
-            setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
-            cout << "\nCould not load portfolio.txt — starting a fresh portfolio instead.\n";
-            resetColor(hConsole);
-            askOwnerNameInteractive(hConsole, ownerName);
-            balance = 0.0;
-            holdCount = 0;
-            savePortfolio(pfFile, ownerName, balance,
-                          holdSymbols, holdShares, holdCount,
-                          symbols, names, prevPrice, currPrice,
-                          highPrice, lowPrice, companyCount);
-        }
-        else
-        {
-            setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-            cout << "\nLoaded portfolio for owner \"" << ownerName << "\".\n";
-            cout << "Cash available: Rs. " << fixed << setprecision(2) << balance << "\n";
-            cout << "Holdings loaded: " << holdCount << "\n";
-            resetColor(hConsole);
-        }
-        cout << "Press any key to open your portfolio...";
-        _getch();
-        return true;
-    }
-
-    if (choice == 2)
-    {
-        cout << "\nCreating a NEW portfolio (old file will be replaced).\n";
-        askOwnerNameInteractive(hConsole, ownerName);
-        balance = 0.0;
-        holdCount = 0;
-        if (!savePortfolio(pfFile, ownerName, balance,
-                           holdSymbols, holdShares, holdCount,
-                           symbols, names, prevPrice, currPrice,
-                           highPrice, lowPrice, companyCount))
-        {
-            setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
-            cout << "\nERROR: Could not create portfolio.txt\n";
-            resetColor(hConsole);
-            cout << "Press any key...";
-            _getch();
-            return false;
-        }
-        setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-        cout << "\nNew portfolio created for owner \"" << ownerName << "\".\n";
-        resetColor(hConsole);
-        cout << "Press any key to open your portfolio...";
-        _getch();
-        return true;
-    }
-
-    cout << "Invalid choice. Returning to Live Market.\n";
-    cout << "Press any key...";
+    cout << "Press any key to open your portfolio...";
     _getch();
-    return false;
-}
-
-void ensureOwnerName(char ownerName[])
-{
-    /* Kept for safety; main setup uses askOwnerNameInteractive. */
-    if (ownerName[0] == '\0' || strcmp(ownerName, "(empty)") == 0)
-    {
-        prepareTextInput();
-        cout << "\nEnter portfolio owner name [0 = Investor]: ";
-        cin.getline(ownerName, OWNER_LEN);
-        string n = trimString(ownerName);
-        if (n.empty() || isCancelToken(n.c_str()))
-            strncpy(ownerName, "Investor", OWNER_LEN - 1);
-        else
-        {
-            strncpy(ownerName, n.c_str(), OWNER_LEN - 1);
-            ownerName[OWNER_LEN - 1] = '\0';
-        }
-    }
+    return true;
 }
 
 /* ---------- Main ---------- */
@@ -1567,19 +1516,17 @@ int main()
         {
             if (ch == 'P')
             {
-                if (!portfolioReady)
+                bool ok = setupPortfolioSession(hConsole, ownerName, balance,
+                                                holdSymbols, holdShares, holdCount, holdCapacity,
+                                                symbols, names, prevPrice, currPrice,
+                                                highPrice, lowPrice, companyCount,
+                                                portfolioReady);
+                if (!ok)
                 {
-                    bool ok = setupPortfolioSession(hConsole, ownerName, balance,
-                                                    holdSymbols, holdShares, holdCount, holdCapacity,
-                                                    symbols, names, prevPrice, currPrice,
-                                                    highPrice, lowPrice, companyCount);
-                    if (!ok)
-                    {
-                        onPortfolio = false;
-                        continue;
-                    }
-                    portfolioReady = true;
+                    onPortfolio = false;
+                    continue;
                 }
+                portfolioReady = true;
                 onPortfolio = true;
             }
             else if (ch == 'A')
