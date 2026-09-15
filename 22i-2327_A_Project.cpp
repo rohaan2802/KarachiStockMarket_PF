@@ -32,20 +32,24 @@ using namespace std;
 #define NAME_LEN 64
 #define OWNER_LEN 64
 
-/* Fixed column widths for portfolio.txt AND console portfolio (must match) */
+/* Fixed column widths for portfolio.txt AND console portfolio (must match).
+ * COL_GAP keeps columns open / readable without looking congested. */
+#define COL_GAP 2
 #define COL_SYM 8
-#define COL_NAME 28
+#define COL_NAME 26
 #define COL_SHARES 12
 #define COL_PRICE 14
-#define COL_GL 14
-#define PORTFOLIO_LINE_WIDTH (COL_SYM + COL_NAME + COL_SHARES + COL_PRICE * 4 + COL_GL)
+#define COL_GL 12
+#define PORTFOLIO_COLS 8
+#define PORTFOLIO_LINE_WIDTH (COL_SYM + COL_NAME + COL_SHARES + COL_PRICE * 4 + COL_GL + COL_GAP * (PORTFOLIO_COLS - 1))
 
-/* Live market board columns — widths fit full header labels */
+/* Live market board columns — full labels + open spacing, still fits maximized console */
 #define MKT_SYM 8
-#define MKT_NAME 34
+#define MKT_NAME 28
 #define MKT_NUM 14
-#define MKT_CHG 8
-#define MKT_LINE_WIDTH (MKT_SYM + MKT_NAME + MKT_NUM * 4 + MKT_CHG)
+#define MKT_CHG 6
+#define MKT_COLS 7
+#define MKT_LINE_WIDTH (MKT_SYM + MKT_NAME + MKT_NUM * 4 + MKT_CHG + COL_GAP * (MKT_COLS - 1))
 
 /* ---------- Console helpers (state passed in via HANDLE) ---------- */
 
@@ -158,6 +162,19 @@ void printCellRightText(ostream &out, const string &text, int width)
     if ((int)t.size() > width)
         t = t.substr(0, (size_t)width);
     out << right << setfill(' ') << setw(width) << t;
+}
+
+/** Open spacing between columns (not congested). */
+void printColGap(ostream &out)
+{
+    out << string(static_cast<size_t>(COL_GAP), ' ');
+}
+
+void printRuleLine(ostream &out, char fill, int width)
+{
+    if (width < 8)
+        width = 8;
+    out << string(static_cast<size_t>(width), fill) << "\n";
 }
 
 void printMoneyCell(ostream &out, double value, int width, bool showPlus)
@@ -458,36 +475,50 @@ void drawLiveMarket(HANDLE hConsole,
 {
     clearScreen();
     setAccentCyan(hConsole);
-    cout << "========================================================================================\n";
+    printRuleLine(cout, '=', MKT_LINE_WIDTH);
     cout << "                        KARACHI STOCK MARKET (LIVE)\n";
-    cout << "========================================================================================\n";
+    printRuleLine(cout, '=', MKT_LINE_WIDTH);
     setAccentYellow(hConsole);
     cout << "Show updates: Enter   | Portfolio: P | Add Stock: A | Remove: R | Add Money: M | Exit: E\n";
     cout << "Tip: Cash starts at Rs. 0 — press M to add money, then A to buy shares.\n";
     cout << "Change: \xE2\x86\x91 = up (rise)   \xE2\x86\x93 = down (fall)   = = unchanged\n";
     resetColor(hConsole);
-    cout << "----------------------------------------------------------------------------------------\n";
+    cout << "\n";
+    printRuleLine(cout, '-', MKT_LINE_WIDTH);
 
     setAccentCyan(hConsole);
     printCellLeft(cout, "Symbol", MKT_SYM);
+    printColGap(cout);
     printCellLeft(cout, "Company Name", MKT_NAME);
+    printColGap(cout);
     printCellRightText(cout, "Previous Price", MKT_NUM);
+    printColGap(cout);
     printCellRightText(cout, "Current Price", MKT_NUM);
+    printColGap(cout);
     printCellRightText(cout, "Change", MKT_CHG);
+    printColGap(cout);
     printCellRightText(cout, "Highest Price", MKT_NUM);
+    printColGap(cout);
     printCellRightText(cout, "Lowest Price", MKT_NUM);
     cout << endl;
     resetColor(hConsole);
-    cout << "----------------------------------------------------------------------------------------\n";
+    printRuleLine(cout, '-', MKT_LINE_WIDTH);
+    cout << "\n";
 
     for (int i = 0; i < companyCount; i++)
     {
         printCellLeft(cout, symbols[i], MKT_SYM);
+        printColGap(cout);
         printCellLeft(cout, names[i], MKT_NAME);
+        printColGap(cout);
         printMoneyCell(cout, prevPrice[i], MKT_NUM, false);
+        printColGap(cout);
         printMoneyCell(cout, currPrice[i], MKT_NUM, false);
+        printColGap(cout);
         printChangeArrow(hConsole, prevPrice[i], currPrice[i]);
+        printColGap(cout);
         printMoneyCell(cout, highPrice[i], MKT_NUM, false);
+        printColGap(cout);
         printMoneyCell(cout, lowPrice[i], MKT_NUM, false);
         cout << endl;
     }
@@ -495,7 +526,7 @@ void drawLiveMarket(HANDLE hConsole,
     int adv = 0, dec = 0;
     findTopAdvancerDecliner(pctChange, companyCount, adv, dec);
 
-    cout << "----------------------------------------------------------------------------------------\n";
+    printRuleLine(cout, '-', MKT_LINE_WIDTH);
     setAccentYellow(hConsole);
     cout << "Total shares traded today : " << totalSharesTraded << endl;
     setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
@@ -507,7 +538,7 @@ void drawLiveMarket(HANDLE hConsole,
     resetColor(hConsole);
     cout << "Note: Price moves are hard-capped at +/-15% of session-start price.\n";
     setAccentCyan(hConsole);
-    cout << "========================================================================================\n";
+    printRuleLine(cout, '=', MKT_LINE_WIDTH);
     resetColor(hConsole);
 }
 
@@ -547,26 +578,35 @@ void drawPortfolio(HANDLE hConsole,
 {
     clearScreen();
     setAccentCyan(hConsole);
-    cout << "========================================================================================\n";
+    printRuleLine(cout, '=', PORTFOLIO_LINE_WIDTH);
     cout << "                     PORTFOLIO OWNER: " << ownerName << " (LIVE)\n";
-    cout << "========================================================================================\n";
+    printRuleLine(cout, '=', PORTFOLIO_LINE_WIDTH);
     setAccentYellow(hConsole);
     cout << "Updates: Enter | Live Market: L | Add: A | Remove: R | Money: M | Withdraw: W\n";
     resetColor(hConsole);
-    cout << "----------------------------------------------------------------------------------------\n";
+    cout << "\n";
+    printRuleLine(cout, '-', PORTFOLIO_LINE_WIDTH);
 
     setAccentCyan(hConsole);
     printCellLeft(cout, "Symbol", COL_SYM);
+    printColGap(cout);
     printCellLeft(cout, "Company Name", COL_NAME);
+    printColGap(cout);
     printCellRightText(cout, "Share Qty", COL_SHARES);
+    printColGap(cout);
     printCellRightText(cout, "Current Price", COL_PRICE);
+    printColGap(cout);
     printCellRightText(cout, "Previous Price", COL_PRICE);
+    printColGap(cout);
     printCellRightText(cout, "Gain / Loss", COL_GL);
+    printColGap(cout);
     printCellRightText(cout, "Highest Price", COL_PRICE);
+    printColGap(cout);
     printCellRightText(cout, "Lowest Price", COL_PRICE);
     cout << endl;
     resetColor(hConsole);
-    cout << "----------------------------------------------------------------------------------------\n";
+    printRuleLine(cout, '-', PORTFOLIO_LINE_WIDTH);
+    cout << "\n";
 
     double todayGL = 0.0;
 
@@ -574,7 +614,7 @@ void drawPortfolio(HANDLE hConsole,
     {
         cout << "  (No holdings yet — cash may be Rs. 0)\n";
         cout << "  Step 1: press M and enter amount (e.g. 500000)  |  0 = cancel any form\n";
-        cout << "  Step 2: press A, type a symbol (e.g. PSO), then share quantity\n";
+        cout << "  Step 2: press A, type a symbol (e.g. PSO), then share quantity\n\n";
     }
 
     for (int h = 0; h < holdCount; h++)
@@ -587,16 +627,23 @@ void drawPortfolio(HANDLE hConsole,
         todayGL += gl;
 
         printCellLeft(cout, symbols[idx], COL_SYM);
+        printColGap(cout);
         printCellLeft(cout, names[idx], COL_NAME);
+        printColGap(cout);
         {
             ostringstream sh;
             sh << holdShares[h];
             printCellRightText(cout, sh.str(), COL_SHARES);
         }
+        printColGap(cout);
         printMoneyCell(cout, currPrice[idx], COL_PRICE, false);
+        printColGap(cout);
         printMoneyCell(cout, prevPrice[idx], COL_PRICE, false);
+        printColGap(cout);
         printGainLossFixed(hConsole, gl, COL_GL);
+        printColGap(cout);
         printMoneyCell(cout, highPrice[idx], COL_PRICE, false);
+        printColGap(cout);
         printMoneyCell(cout, lowPrice[idx], COL_PRICE, false);
         cout << endl;
     }
@@ -604,7 +651,8 @@ void drawPortfolio(HANDLE hConsole,
     double previousBalance = balance;
     double newBalance = balance + todayGL;
 
-    cout << "----------------------------------------------------------------------------------------\n";
+    cout << "\n";
+    printRuleLine(cout, '-', PORTFOLIO_LINE_WIDTH);
     cout << "Today's Gain or Loss (Rs.) : ";
     printGainLossFixed(hConsole, todayGL, COL_GL);
     cout << endl;
@@ -615,7 +663,7 @@ void drawPortfolio(HANDLE hConsole,
     resetColor(hConsole);
     cout << "Cash available             : " << fixed << setprecision(2) << balance << endl;
     setAccentCyan(hConsole);
-    cout << "========================================================================================\n";
+    printRuleLine(cout, '=', PORTFOLIO_LINE_WIDTH);
     resetColor(hConsole);
 }
 
@@ -925,18 +973,25 @@ void writeAlignedMoney(ostream &out, double value, int width, bool showPlus)
 
 void writePortfolioSeparator(ostream &out)
 {
-    out << setfill('*') << setw(PORTFOLIO_LINE_WIDTH) << "" << setfill(' ') << "\n";
+    printRuleLine(out, '*', PORTFOLIO_LINE_WIDTH);
 }
 
 void writePortfolioHeaderRow(ostream &out)
 {
     printCellLeft(out, "Symbol", COL_SYM);
+    printColGap(out);
     printCellLeft(out, "Company Name", COL_NAME);
+    printColGap(out);
     printCellRightText(out, "Share Qty", COL_SHARES);
+    printColGap(out);
     printCellRightText(out, "Current Price", COL_PRICE);
+    printColGap(out);
     printCellRightText(out, "Previous Price", COL_PRICE);
+    printColGap(out);
     printCellRightText(out, "Gain / Loss", COL_GL);
+    printColGap(out);
     printCellRightText(out, "Highest Price", COL_PRICE);
+    printColGap(out);
     printCellRightText(out, "Lowest Price", COL_PRICE);
     out << "\n";
 }
@@ -952,29 +1007,35 @@ void writePortfolioDataRow(ostream &out,
                            double low)
 {
     printCellLeft(out, symbol, COL_SYM);
+    printColGap(out);
     printCellLeft(out, companyName, COL_NAME);
+    printColGap(out);
     {
         ostringstream sh;
         sh << shares;
         printCellRightText(out, sh.str(), COL_SHARES);
     }
+    printColGap(out);
     printMoneyCell(out, closePrice, COL_PRICE, false);
+    printColGap(out);
     printMoneyCell(out, previousPrice, COL_PRICE, false);
+    printColGap(out);
     writeAlignedMoney(out, gainLoss, COL_GL, true);
+    printColGap(out);
     printMoneyCell(out, high, COL_PRICE, false);
+    printColGap(out);
     printMoneyCell(out, low, COL_PRICE, false);
     out << "\n";
 }
 
 void writePortfolioFooterLine(ostream &out, const char *label, double value)
 {
-    const int labelWidth = 30;
-    const int valueWidth = 16;
-    out << left << setw(labelWidth) << label
-        << " * "
-        << right;
+    const int labelWidth = 32;
+    const int valueWidth = 18;
+    out << left << setfill(' ') << setw(labelWidth) << label
+        << "  *  ";
     writeAlignedMoney(out, value, valueWidth, true);
-    out << " *" << "\n";
+    out << "  *" << "\n";
 }
 
 bool savePortfolio(const char *filename,
@@ -1005,11 +1066,12 @@ bool savePortfolio(const char *filename,
     fout << "Portfolio owner: " << ownerName << "\n\n";
     writePortfolioHeaderRow(fout);
     writePortfolioSeparator(fout);
+    fout << "\n";
 
     if (holdCount == 0)
     {
         fout << left << setw(PORTFOLIO_LINE_WIDTH)
-             << "(No holdings in this session)" << "\n";
+             << "(No holdings in this session)" << "\n\n";
     }
 
     for (int h = 0; h < holdCount; h++)
@@ -1029,6 +1091,7 @@ bool savePortfolio(const char *filename,
                               lowPrice[idx]);
     }
 
+    fout << "\n";
     writePortfolioSeparator(fout);
     writePortfolioFooterLine(fout, "Today's Gain or Loss (Rs.)", todayGL);
     writePortfolioFooterLine(fout, "Previous Balance (Rs.)", previousBalance);
