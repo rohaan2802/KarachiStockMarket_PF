@@ -26,7 +26,7 @@ From the project folder (`KarachiStockMarket_PF`):
 run.bat
 ```
 
-This builds if needed and opens the simulator in a new console window. Use **Enter / P / A / R / M / E** there.
+This **always cleans the old `.exe`, recompiles** `22i-2327_A_Project.cpp`, then opens the simulator in a **new console window**. Use **Enter / P / A / R / M / E** there.
 
 ### Build, then run manually
 
