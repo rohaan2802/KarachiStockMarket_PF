@@ -35,16 +35,16 @@ using namespace std;
 /* Fixed column widths for portfolio.txt AND console portfolio (must match) */
 #define COL_SYM 8
 #define COL_NAME 28
-#define COL_SHARES 10
-#define COL_PRICE 12
+#define COL_SHARES 12
+#define COL_PRICE 14
 #define COL_GL 14
 #define PORTFOLIO_LINE_WIDTH (COL_SYM + COL_NAME + COL_SHARES + COL_PRICE * 4 + COL_GL)
 
-/* Live market board columns */
+/* Live market board columns — widths fit full header labels */
 #define MKT_SYM 8
 #define MKT_NAME 34
-#define MKT_NUM 10
-#define MKT_CHG 5
+#define MKT_NUM 14
+#define MKT_CHG 8
 #define MKT_LINE_WIDTH (MKT_SYM + MKT_NAME + MKT_NUM * 4 + MKT_CHG)
 
 /* ---------- Console helpers (state passed in via HANDLE) ---------- */
@@ -194,25 +194,26 @@ void printGainLossFixed(HANDLE hConsole, double value, int width)
     resetColor(hConsole);
 }
 
-/* Always print a change marker so every row shows direction (ASCII = 1 column). */
+/* Always print direction: -> up, <- down, -- unchanged (fixed column width). */
 void printChangeArrow(HANDLE hConsole, double prev, double curr)
 {
-    cout << " ";
+    const char *mark;
     if (curr > prev + 0.0001)
     {
         setColor(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-        cout << right << setw(MKT_CHG - 1) << "^";
+        mark = "->";
     }
     else if (curr < prev - 0.0001)
     {
         setColor(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
-        cout << right << setw(MKT_CHG - 1) << "v";
+        mark = "<-";
     }
     else
     {
         setAccentYellow(hConsole);
-        cout << right << setw(MKT_CHG - 1) << "-";
+        mark = "--";
     }
+    cout << right << setfill(' ') << setw(MKT_CHG) << mark;
     resetColor(hConsole);
 }
 
@@ -459,18 +460,18 @@ void drawLiveMarket(HANDLE hConsole,
     setAccentYellow(hConsole);
     cout << "Show updates: Enter   | Portfolio: P | Add Stock: A | Remove: R | Add Money: M | Exit: E\n";
     cout << "Tip: Cash starts at Rs. 0 — press M to add money, then A to buy shares.\n";
-    cout << "Change: ^ = up   v = down   - = unchanged (every stock always shows a marker)\n";
+    cout << "Change: -> = up (rise)   <- = down (fall)   -- = unchanged\n";
     resetColor(hConsole);
     cout << "----------------------------------------------------------------------------------------\n";
 
     setAccentCyan(hConsole);
-    printCellLeft(cout, "Stocks", MKT_SYM);
+    printCellLeft(cout, "Symbol", MKT_SYM);
     printCellLeft(cout, "Company Name", MKT_NAME);
-    printCellRightText(cout, "Prev", MKT_NUM);
-    printCellRightText(cout, "Curr", MKT_NUM);
-    printCellRightText(cout, "Chg", MKT_CHG);
-    printCellRightText(cout, "High", MKT_NUM);
-    printCellRightText(cout, "Low", MKT_NUM);
+    printCellRightText(cout, "Previous Price", MKT_NUM);
+    printCellRightText(cout, "Current Price", MKT_NUM);
+    printCellRightText(cout, "Change", MKT_CHG);
+    printCellRightText(cout, "Highest Price", MKT_NUM);
+    printCellRightText(cout, "Lowest Price", MKT_NUM);
     cout << endl;
     resetColor(hConsole);
     cout << "----------------------------------------------------------------------------------------\n";
@@ -551,14 +552,14 @@ void drawPortfolio(HANDLE hConsole,
     cout << "----------------------------------------------------------------------------------------\n";
 
     setAccentCyan(hConsole);
-    printCellLeft(cout, "Stocks", COL_SYM);
+    printCellLeft(cout, "Symbol", COL_SYM);
     printCellLeft(cout, "Company Name", COL_NAME);
-    printCellRightText(cout, "Shares", COL_SHARES);
-    printCellRightText(cout, "Current", COL_PRICE);
-    printCellRightText(cout, "Previous", COL_PRICE);
-    printCellRightText(cout, "Gain/Loss", COL_GL);
-    printCellRightText(cout, "High", COL_PRICE);
-    printCellRightText(cout, "Low", COL_PRICE);
+    printCellRightText(cout, "Share Qty", COL_SHARES);
+    printCellRightText(cout, "Current Price", COL_PRICE);
+    printCellRightText(cout, "Previous Price", COL_PRICE);
+    printCellRightText(cout, "Gain / Loss", COL_GL);
+    printCellRightText(cout, "Highest Price", COL_PRICE);
+    printCellRightText(cout, "Lowest Price", COL_PRICE);
     cout << endl;
     resetColor(hConsole);
     cout << "----------------------------------------------------------------------------------------\n";
@@ -925,14 +926,14 @@ void writePortfolioSeparator(ostream &out)
 
 void writePortfolioHeaderRow(ostream &out)
 {
-    printCellLeft(out, "Stocks", COL_SYM);
+    printCellLeft(out, "Symbol", COL_SYM);
     printCellLeft(out, "Company Name", COL_NAME);
-    printCellRightText(out, "Shares", COL_SHARES);
-    printCellRightText(out, "Close", COL_PRICE);
-    printCellRightText(out, "Previous", COL_PRICE);
-    printCellRightText(out, "Gain/Loss", COL_GL);
-    printCellRightText(out, "High", COL_PRICE);
-    printCellRightText(out, "Low", COL_PRICE);
+    printCellRightText(out, "Share Qty", COL_SHARES);
+    printCellRightText(out, "Current Price", COL_PRICE);
+    printCellRightText(out, "Previous Price", COL_PRICE);
+    printCellRightText(out, "Gain / Loss", COL_GL);
+    printCellRightText(out, "Highest Price", COL_PRICE);
+    printCellRightText(out, "Lowest Price", COL_PRICE);
     out << "\n";
 }
 
@@ -1092,7 +1093,7 @@ int main()
     resetColor(hConsole);
     _getch();
 
-    /* First tick so Prev/Curr differ and every stock shows ^ / v on open (no Enter needed). */
+    /* First tick so Previous/Current differ and every stock shows -> / <- on open. */
     refreshAllPrices(sessionStart, prevPrice, currPrice,
                      highPrice, lowPrice, pctChange, companyCount);
 
